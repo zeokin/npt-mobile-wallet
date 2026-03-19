@@ -1,0 +1,40 @@
+import { useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { toast } from "sonner";
+import { unlockWallet } from "../api/rpc";
+
+export default function UnlockScreen() {
+  const navigate = useNavigate();
+  const [pin, setPin] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  const handleUnlock = async () => {
+    if (!pin) { toast.error("Enter your PIN"); return; }
+    setLoading(true);
+    try {
+      await unlockWallet(pin);
+      navigate("/connect", { replace: true });
+    } catch (e) { toast.error(String(e)); setPin(""); }
+    finally { setLoading(false); }
+  };
+
+  return (
+    <div className="flex flex-col items-center justify-center h-full px-6">
+      <div className="w-full max-w-sm space-y-6">
+        <div className="text-center space-y-2">
+          <div className="text-5xl font-bold text-[var(--npt-blue)]">&#x2646;</div>
+          <h1 className="text-2xl font-bold">Welcome Back</h1>
+          <p className="text-sm text-[var(--npt-muted)]">Enter your PIN to unlock the wallet.</p>
+        </div>
+        <input type="password" inputMode="numeric" placeholder="PIN" value={pin}
+          onChange={(e) => setPin(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && handleUnlock()}
+          className="w-full px-3 py-3 rounded-lg bg-[var(--npt-card)] border border-[var(--npt-border)] text-[var(--npt-text)] text-center text-2xl tracking-[0.5em] focus:outline-none focus:border-[var(--npt-blue)]" />
+        <button onClick={handleUnlock} disabled={loading}
+          className="w-full py-3 rounded-lg bg-[var(--npt-blue)] text-white font-semibold disabled:opacity-50 active:opacity-80">
+          {loading ? "Unlocking..." : "Unlock"}
+        </button>
+      </div>
+    </div>
+  );
+}
