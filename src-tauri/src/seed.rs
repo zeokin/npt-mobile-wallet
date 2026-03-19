@@ -3,6 +3,7 @@ use aes_gcm::{Aes256Gcm, KeyInit, Nonce};
 use aes_gcm::aead::Aead;
 use rand::RngCore;
 use sha2::{Sha256, Digest};
+use tauri::Manager;
 use zeroize::Zeroize;
 use std::path::PathBuf;
 

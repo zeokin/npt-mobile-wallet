@@ -35,7 +35,7 @@ fn create_wallet(app: tauri::AppHandle, pin: String) -> Result<Vec<String>, Stri
     let entropy = seed::mnemonic_to_entropy(&mnemonic);
     let encrypted = seed::encrypt_seed(&entropy, &pin)?;
     seed::save_seed_file(&path, &encrypted)?;
-    let words: Vec<String> = mnemonic.word_iter().map(|w| w.to_string()).collect();
+    let words: Vec<String> = mnemonic.words().map(|w| w.to_string()).collect();
     Ok(words)
 }
 
@@ -78,7 +78,7 @@ fn export_seed_phrase(
     let entropy = seed::decrypt_seed(&encrypted, &pin)?;
     let mnemonic = bip39::Mnemonic::from_entropy(&entropy)
         .map_err(|e| format!("Invalid entropy: {}", e))?;
-    let words: Vec<String> = mnemonic.word_iter().map(|w| w.to_string()).collect();
+    let words: Vec<String> = mnemonic.words().map(|w| w.to_string()).collect();
     Ok(words)
 }
 
