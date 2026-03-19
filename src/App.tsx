@@ -1,51 +1,44 @@
-import { useState } from "react";
-import reactLogo from "./assets/react.svg";
-import { invoke } from "@tauri-apps/api/core";
-import "./App.css";
+import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { Toaster } from "sonner";
+import SeedSetupScreen from "./screens/SeedSetupScreen";
+import SeedCreateScreen from "./screens/SeedCreateScreen";
+import SeedImportScreen from "./screens/SeedImportScreen";
+import UnlockScreen from "./screens/UnlockScreen";
+import ConnectScreen from "./screens/ConnectScreen";
+import WalletScreen from "./screens/WalletScreen";
+import SendScreen from "./screens/SendScreen";
+import ReceiveScreen from "./screens/ReceiveScreen";
+import HistoryScreen from "./screens/HistoryScreen";
+import SettingsScreen from "./screens/SettingsScreen";
 
-function App() {
-  const [greetMsg, setGreetMsg] = useState("");
-  const [name, setName] = useState("");
-
-  async function greet() {
-    // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
-    setGreetMsg(await invoke("greet", { name }));
-  }
-
+export default function App() {
   return (
-    <main className="container">
-      <h1>Welcome to Tauri + React</h1>
-
-      <div className="row">
-        <a href="https://vite.dev" target="_blank">
-          <img src="/vite.svg" className="logo vite" alt="Vite logo" />
-        </a>
-        <a href="https://tauri.app" target="_blank">
-          <img src="/tauri.svg" className="logo tauri" alt="Tauri logo" />
-        </a>
-        <a href="https://react.dev" target="_blank">
-          <img src={reactLogo} className="logo react" alt="React logo" />
-        </a>
-      </div>
-      <p>Click on the Tauri, Vite, and React logos to learn more.</p>
-
-      <form
-        className="row"
-        onSubmit={(e) => {
-          e.preventDefault();
-          greet();
-        }}
-      >
-        <input
-          id="greet-input"
-          onChange={(e) => setName(e.currentTarget.value)}
-          placeholder="Enter a name..."
+    <BrowserRouter>
+      <div className="h-full w-full bg-[var(--npt-dark)] text-[var(--npt-text)]">
+        <Routes>
+          <Route path="/" element={<SeedSetupScreen />} />
+          <Route path="/seed/create" element={<SeedCreateScreen />} />
+          <Route path="/seed/import" element={<SeedImportScreen />} />
+          <Route path="/unlock" element={<UnlockScreen />} />
+          <Route path="/connect" element={<ConnectScreen />} />
+          <Route path="/wallet" element={<WalletScreen />} />
+          <Route path="/send" element={<SendScreen />} />
+          <Route path="/receive" element={<ReceiveScreen />} />
+          <Route path="/history" element={<HistoryScreen />} />
+          <Route path="/settings" element={<SettingsScreen />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+        <Toaster
+          position="top-center"
+          toastOptions={{
+            style: {
+              background: "var(--npt-card)",
+              color: "var(--npt-text)",
+              border: "1px solid var(--npt-border)",
+            },
+          }}
         />
-        <button type="submit">Greet</button>
-      </form>
-      <p>{greetMsg}</p>
-    </main>
+      </div>
+    </BrowserRouter>
   );
 }
-
-export default App;
