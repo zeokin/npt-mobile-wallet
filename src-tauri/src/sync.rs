@@ -15,7 +15,7 @@ use neptune_cash::state::wallet::address::ReceivingAddress;
 use neptune_cash::state::wallet::address::SpendingKey;
 use neptune_cash::state::wallet::wallet_entropy::WalletEntropy;
 use serde::{Deserialize, Serialize};
-use tasm_lib::triton_vm::prelude::BFieldElement;
+use neptune_cash::prelude::triton_vm::prelude::BFieldElement;
 
 use crate::rpc::RpcClient;
 
@@ -162,8 +162,8 @@ pub async fn scan_for_utxos(
 /// Announcements come as arrays of u64 values or nested structures.
 fn parse_announcement_message(
     val: &serde_json::Value,
-) -> Option<Vec<tasm_lib::triton_vm::prelude::BFieldElement>> {
-    use tasm_lib::triton_vm::prelude::BFieldElement;
+) -> Option<Vec<neptune_cash::prelude::triton_vm::prelude::BFieldElement>> {
+    use neptune_cash::prelude::triton_vm::prelude::BFieldElement;
 
     // Try direct array of numbers: [79, 12345, ...]
     if let Some(arr) = val.as_array() {
