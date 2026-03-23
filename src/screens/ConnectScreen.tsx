@@ -22,6 +22,11 @@ export default function ConnectScreen() {
     finally { setLoading(false); }
   };
 
+  const handleSkip = () => {
+    toast.info("Offline mode — some features require a supporter connection");
+    navigate("/wallet", { replace: true });
+  };
+
   return (
     <div className="flex flex-col items-center justify-center h-full px-6">
       <div className="w-full max-w-sm space-y-6">
@@ -47,8 +52,14 @@ export default function ConnectScreen() {
             className="w-full py-3 rounded-lg bg-[var(--npt-blue)] text-white font-semibold disabled:opacity-50 active:opacity-80 transition-opacity">
             {loading ? "Connecting..." : "Connect"}
           </button>
+          <button onClick={handleSkip}
+            className="w-full py-2 text-sm text-[var(--npt-muted)] hover:text-[var(--npt-text)] transition-colors">
+            Skip — use offline mode
+          </button>
         </div>
-        <p className="text-xs text-center text-[var(--npt-muted)]">Supporter must be running neptune-core with UTXO index</p>
+        <p className="text-xs text-center text-[var(--npt-muted)]">
+          Supporter must run: neptune-core --listen-rpc --utxo-index
+        </p>
       </div>
     </div>
   );
