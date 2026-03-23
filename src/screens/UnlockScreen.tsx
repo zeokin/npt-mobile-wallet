@@ -7,15 +7,26 @@ export default function UnlockScreen() {
   const navigate = useNavigate();
   const [pin, setPin] = useState("");
   const [loading, setLoading] = useState(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   const handleUnlock = async () => {
-    if (!pin) { toast.error("Enter your PIN"); return; }
+    if (!pin) {
+      toast.error("Enter your PIN");
+      return;
+    }
     setLoading(true);
+    setErrorMsg(null);
     try {
       await unlockWallet(pin);
       navigate("/connect", { replace: true });
-    } catch (e) { toast.error(String(e)); setPin(""); }
-    finally { setLoading(false); }
+    } catch (e) {
+      const msg = String(e);
+      setErrorMsg(msg);
+      toast.error(msg);
+      setPin("");
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -26,12 +37,26 @@ export default function UnlockScreen() {
           <h1 className="text-2xl font-bold">Welcome Back</h1>
           <p className="text-sm text-[var(--npt-muted)]">Enter your PIN to unlock the wallet.</p>
         </div>
-        <input type="password" inputMode="numeric" placeholder="PIN" value={pin}
+
+        <input
+          type="password"
+          inputMode="numeric"
+          placeholder="PIN"
+          value={pin}
           onChange={(e) => setPin(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && handleUnlock()}
-          className="w-full px-3 py-3 rounded-lg bg-[var(--npt-card)] border border-[var(--npt-border)] text-[var(--npt-text)] text-center text-2xl tracking-[0.5em] focus:outline-none focus:border-[var(--npt-blue)]" />
-        <button onClick={handleUnlock} disabled={loading}
-          className="w-full py-3 rounded-lg bg-[var(--npt-blue)] text-white font-semibold disabled:opacity-50 active:opacity-80">
+          className="w-full px-3 py-3 rounded-lg bg-[var(--npt-card)] border border-[var(--npt-border)] text-[var(--npt-text)] text-center text-2xl tracking-[0.5em] focus:outline-none focus:border-[var(--npt-blue)]"
+        />
+
+        {errorMsg && (
+          <p className="text-center text-sm text-red-400">{errorMsg}</p>
+        )}
+
+        <button
+          onClick={handleUnlock}
+          disabled={loading}
+          className="w-full py-3 rounded-lg bg-[var(--npt-blue)] text-white font-semibold disabled:opacity-50 active:opacity-80"
+        >
           {loading ? "Unlocking..." : "Unlock"}
         </button>
       </div>

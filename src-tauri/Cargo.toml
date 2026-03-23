@@ -19,6 +19,12 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 reqwest = { version = "0.12", features = ["json"] }
 tokio = { version = "1", features = ["full"] }
+anyhow = "1"
+
+# Neptune-core types for local key derivation and transaction building.
+# This is the critical dependency — gives us SecretKeyMaterial, WalletEntropy,
+# GenerationSpendingKey, ReceivingAddress, etc.
+neptune-cash = { git = "https://github.com/Neptune-Crypto/neptune-core.git", tag = "v0.7.0" }
 
 # Seed management
 bip39 = "2.1"
@@ -26,4 +32,6 @@ aes-gcm = "0.10"
 rand = "0.8"
 hex = "0.4"
 sha2 = "0.10"
+argon2 = "0.5"
 zeroize = { version = "1", features = ["derive"] }
+bincode = "1"

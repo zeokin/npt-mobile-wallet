@@ -9,6 +9,16 @@ export const lockWallet = () => invoke<void>("lock_wallet");
 export const exportSeedPhrase = (pin: string) => invoke<string[]>("export_seed_phrase", { pin });
 export const deleteWallet = () => invoke<void>("delete_wallet");
 
+// Session management
+export const isSessionValid = () => invoke<boolean>("is_session_valid");
+export const touchActivity = () => invoke<void>("touch_activity");
+
+// Local key derivation (on-device, no network needed)
+export const generateLocalAddress = (pin: string, index: number, keyType?: string, network?: string) =>
+  invoke<string>("generate_local_address", {
+    pin, index, keyType: keyType || null, network: network || null
+  });
+
 // Supporter connection
 export interface ConnectionInfo { network: string; block_height: number; }
 export const connectNode = (url: string, authToken?: string) =>
