@@ -19,6 +19,24 @@ export const generateLocalAddress = (pin: string, index: number, keyType?: strin
     pin, index, keyType: keyType || null, network: network || null
   });
 
+// UTXO scanning (uses supporter + local decryption)
+export interface SyncResult {
+  balance: string;
+  utxo_count: number;
+  blocks_scanned: number;
+  utxos: DiscoveredUtxo[];
+}
+export interface DiscoveredUtxo {
+  amount: string;
+  block_height: number;
+  likely_spent: boolean;
+  incoming_utxo_hex: string;
+  key_type: string;
+  key_index: number;
+}
+export const syncWallet = (pin: string, numKeys?: number) =>
+  invoke<SyncResult>("sync_wallet", { pin, numKeys: numKeys || null });
+
 // Supporter connection
 export interface ConnectionInfo { network: string; block_height: number; }
 export const connectNode = (url: string, authToken?: string) =>

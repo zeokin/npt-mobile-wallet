@@ -139,6 +139,75 @@ impl RpcClient {
 
     pub async fn validate_address(&self, address: &str) -> Result<bool, String> {
         let result = self.call("wallet_validateAddress", json!([address])).await?;
-        result.as_bool().ok_or("Invalid validation response".to_string())
+        // Response might be bool directly or wrapped
+        if let Some(b) = result.as_bool() {
+            return Ok(b);
+        }
+        if let Some(b) = result.get("valid").and_then(|v| v.as_bool()) {
+            return Ok(b);
+        }
+        Err(format!("Invalid validation response: {}", result))
+    }
+
+    // ── UTXO Scanning Endpoints ─────────────────────────────────
+
+    /// Find blocks containing announcements matching our flags.
+    /// Method: utxoindex_blockHeightsByFlags
+    pub async fn block_heights_by_flags(
+        &self,
+        flags: &[neptune_cash::state::wallet::address::announcement_flag::AnnouncementFlag],
+    ) -> Result<Vec<u64>, String> {
+        let flags_json = serde_json::to_value(flags)
+            .map_err(|e| format!("Serialize flags: {}", e))?;
+        let result = self.call("utxoindex_blockHeightsByFlags", json!([flags_json])).await?;
+
+        // Response: {"block_heights": [1, 2, 3]} or {"blockHeights": [...]}
+        let heights = result
+            .get("block_heights")
+            .or_else(|| result.get("blockHeights"))
+            .and_then(|v| v.as_array())
+            .ok_or_else(|| format!("Invalid blockHeightsByFlags response: {}", result))?;
+
+        heights
+            .iter()
+            .map(|v| v.as_u64().ok_or_else(|| "Invalid block height".to_string()))
+            .collect()
+    }
+
+    /// Get transaction kernel for a block at given height.
+    /// Method: archival_getBlockTransactionKernel
+    pub async fn get_block_transaction_kernel(
+        &self,
+        height: u64,
+    ) -> Result<Option<Value>, String> {
+        let result = self
+            .call(
+                "archival_getBlockTransactionKernel",
+                json!([{ "Height": height }]),
+            )
+            .await?;
+
+        // Response: {"kernel": {...}} or {"kernel": null}
+        let kernel = result.get("kernel").unwrap_or(&result);
+        if kernel.is_null() {
+            Ok(None)
+        } else {
+            Ok(Some(kernel.clone()))
+        }
+    }
+
+    /// Check if a UTXO's bloom indices are set (likely spent).
+    /// Method: archival_areBloomIndicesSet
+    pub async fn are_bloom_indices_set(&self, absolute_index_set: &Value) -> Result<bool, String> {
+        let result = self
+            .call("archival_areBloomIndicesSet", json!([absolute_index_set]))
+            .await?;
+
+        // Response: {"are_set": true} or {"areSet": true}
+        result
+            .get("are_set")
+            .or_else(|| result.get("areSet"))
+            .and_then(|v| v.as_bool())
+            .ok_or_else(|| format!("Invalid areBloomIndicesSet response: {}", result))
     }
 }

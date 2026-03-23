@@ -1,6 +1,7 @@
 mod keys;
 mod rpc;
 mod seed;
+mod sync;
 
 use rpc::RpcClient;
 use serde::Serialize;
@@ -210,10 +211,23 @@ fn generate_local_address(
     keys::derive_receiving_address(&entropy, index, kt, net)
 }
 
-// NOTE: ViewKey is an XNT-only concept. neptune-core v0.7.0 does not have it.
-// UTXO scanning approach needs to be discussed with Alan.
-// Options: (a) propose ViewKey PR to neptune-core, (b) use GenerationSpendingKey
-// components directly, (c) use existing wallet endpoints differently.
+/// Scan the blockchain for UTXOs belonging to this wallet.
+/// Uses Thorkil's privacy-preserving approach:
+/// AnnouncementFlag → blockHeightsByFlags → decrypt locally.
+#[tauri::command]
+async fn sync_wallet(
+    app: tauri::AppHandle,
+    pin: String,
+    num_keys: Option<u64>,
+    state: State<'_, AppState>,
+) -> Result<sync::SyncResult, String> {
+    check_session(&state)?;
+    touch_session(&state);
+    let rpc = get_rpc(&state)?;
+    let entropy = get_wallet_entropy(&app, &pin)?;
+    let key_count = num_keys.unwrap_or(5); // scan first 5 addresses by default
+    sync::scan_for_utxos(&rpc, &entropy, key_count, 1).await
+}
 
 // ── Supporter Connection Commands ────────────────────────────
 
@@ -336,6 +350,8 @@ pub fn run() {
             delete_wallet,
             // Local key derivation
             generate_local_address,
+            // UTXO scanning
+            sync_wallet,
             // Supporter
             connect_node,
             disconnect_node,
