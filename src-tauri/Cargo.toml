@@ -35,3 +35,19 @@ sha2 = "0.10"
 argon2 = "0.5"
 zeroize = { version = "1", features = ["derive"] }
 bincode = "1"
+
+# Android: vendored OpenSSL (avoids cross-compile issues)
+[target.'cfg(target_os = "android")'.dependencies]
+openssl = { version = "0.10", features = ["vendored"] }
+
+# Override leveldb-sys with a stub — we don't use LevelDB in the mobile wallet,
+# but neptune-cash pulls it in transitively. The stub avoids CMake cross-compile issues.
+[patch.crates-io]
+leveldb-sys = { path = "../leveldb-sys" }
+
+# Optimize triton-vm in debug builds to prevent stack overflows
+[profile.dev.package.triton-vm]
+opt-level = 3
+
+[profile.dev.package.twenty-first]
+opt-level = 1

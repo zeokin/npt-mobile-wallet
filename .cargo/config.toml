@@ -1,0 +1,13 @@
+[env]
+# 32MB stack for rustc — prevents triton-vm build script stack overflow
+RUST_MIN_STACK = "33554432"
+# CMake compatibility for older CMakeLists.txt files
+CMAKE_POLICY_VERSION_MINIMUM = "3.5"
+
+[target.aarch64-linux-android]
+linker = "aarch64-linux-android24-clang"
+ar = "llvm-ar"
+
+[target.x86_64-linux-android]
+linker = "x86_64-linux-android24-clang"
+ar = "llvm-ar"
