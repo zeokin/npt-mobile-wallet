@@ -1,0 +1,5 @@
+[package]
+name = "systemstat"
+version = "0.2.6"
+edition = "2021"
+description = "Stub for cross-compilation — mobile wallet doesn't use system stats"

@@ -40,10 +40,15 @@ bincode = "1"
 # but neptune-cash pulls it in transitively. The stub avoids CMake cross-compile issues.
 [patch.crates-io]
 leveldb-sys = { path = "../leveldb-sys" }
+systemstat = { path = "../systemstat-stub" }
 
 # Optimize triton-vm in debug builds to prevent stack overflows
 [profile.dev.package.triton-vm]
 opt-level = 3
 
 [profile.dev.package.twenty-first]
+opt-level = 1
+
+# Build scripts run on the host — increase stack to prevent overflow
+[profile.dev.build-override]
 opt-level = 1
