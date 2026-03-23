@@ -1,24 +1,15 @@
-import { useEffect, useState } from "react";
-import { toast } from "sonner";
-import { getIncomingHistory, getOutgoingHistory } from "../api/rpc";
+import { useState } from "react";
 import NavBar from "../components/ui/NavBar";
 
 export default function HistoryScreen() {
   const [tab, setTab] = useState<"in" | "out">("in");
-  const [incoming, setIncoming] = useState<any[]>([]);
-  const [outgoing, setOutgoing] = useState<any[]>([]);
 
-  useEffect(() => {
-    const fetch = async () => {
-      try {
-        const inc = await getIncomingHistory();
-        setIncoming(Array.isArray(inc) ? inc : []);
-        const out = await getOutgoingHistory();
-        setOutgoing(Array.isArray(out) ? out : []);
-      } catch (e) { toast.error(String(e)); }
-    };
-    fetch();
-  }, []);
+  // In nimble mode, history comes from local data:
+  // - Incoming: discovered via UTXO sync (from sync results)
+  // - Outgoing: stored locally after each send
+  // TODO: Populate from local storage in Phase 3
+  const incoming: any[] = [];
+  const outgoing: any[] = [];
 
   const items = tab === "in" ? incoming : outgoing;
 
@@ -39,7 +30,14 @@ export default function HistoryScreen() {
       </div>
       <div className="flex-1 overflow-y-auto px-4 py-2 space-y-2">
         {items.length === 0 ? (
-          <p className="text-sm text-[var(--npt-muted)] text-center mt-8">No transactions yet.</p>
+          <div className="text-center mt-8 space-y-2">
+            <p className="text-sm text-[var(--npt-muted)]">No transactions yet.</p>
+            <p className="text-xs text-[var(--npt-muted)]">
+              {tab === "in"
+                ? "Incoming transactions will appear after syncing your wallet."
+                : "Outgoing transactions will appear after you send NPT."}
+            </p>
+          </div>
         ) : (
           items.map((tx: any, i: number) => (
             <div key={i} className="p-3 rounded-lg bg-[var(--npt-card)] border border-[var(--npt-border)] flex justify-between items-center">
