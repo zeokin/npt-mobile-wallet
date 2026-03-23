@@ -42,13 +42,25 @@ bincode = "1"
 leveldb-sys = { path = "../leveldb-sys" }
 systemstat = { path = "../systemstat-stub" }
 
-# Optimize triton-vm in debug builds to prevent stack overflows
+# Optimize triton-vm aggressively in all profiles to prevent stack overflows
 [profile.dev.package.triton-vm]
 opt-level = 3
+debug = false
+incremental = false
+debug-assertions = false
+overflow-checks = false
 
 [profile.dev.package.twenty-first]
 opt-level = 1
 
-# Build scripts run on the host — increase stack to prevent overflow
-[profile.dev.build-override]
-opt-level = 1
+[profile.release]
+lto = true
+opt-level = 3
+codegen-units = 1
+
+[profile.release.package.triton-vm]
+opt-level = 3
+debug = false
+incremental = false
+debug-assertions = false
+overflow-checks = false
