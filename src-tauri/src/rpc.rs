@@ -86,12 +86,26 @@ impl RpcClient {
 
     pub async fn get_network(&self) -> Result<String, String> {
         let result = self.call("node_network", json!([])).await?;
-        result.as_str().map(|s| s.to_string()).ok_or("Invalid network response".to_string())
+        // Response: {"network": "main"} or just "main"
+        if let Some(s) = result.as_str() {
+            return Ok(s.to_string());
+        }
+        if let Some(s) = result.get("network").and_then(|v| v.as_str()) {
+            return Ok(s.to_string());
+        }
+        Err(format!("Invalid network response: {}", result))
     }
 
     pub async fn get_block_height(&self) -> Result<u64, String> {
         let result = self.call("chain_height", json!([])).await?;
-        result.as_u64().ok_or("Invalid height response".to_string())
+        // Response: {"height": 12345} or just 12345
+        if let Some(n) = result.as_u64() {
+            return Ok(n);
+        }
+        if let Some(n) = result.get("height").and_then(|v| v.as_u64()) {
+            return Ok(n);
+        }
+        Err(format!("Invalid height response: {}", result))
     }
 
     pub async fn get_balance(&self) -> Result<Value, String> {
