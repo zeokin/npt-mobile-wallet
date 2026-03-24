@@ -23,6 +23,12 @@ pub trait Platform {
             "not supported on this platform",
         ))
     }
+    fn cpu_temp(&self) -> Result<f32, std::io::Error> {
+        Err(std::io::Error::new(
+            std::io::ErrorKind::Unsupported,
+            "not supported on this platform",
+        ))
+    }
     fn memory(&self) -> Result<Memory, std::io::Error> {
         Err(std::io::Error::new(
             std::io::ErrorKind::Unsupported,
