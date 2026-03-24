@@ -11,26 +11,21 @@ export default function ReceiveScreen() {
   const [loading, setLoading] = useState(false);
   const [addressIndex, setAddressIndex] = useState(0);
   const [pin, setPin] = useState("");
-  const [showPin, setShowPin] = useState(false);
+  const [step, setStep] = useState<"idle" | "pin" | "done">("idle");
   const { network } = useSettingsStore();
-
-  const handleGenerate = () => {
-    setShowPin(true);
-  };
 
   const doGenerate = async () => {
     if (!pin) {
       toast.error("Enter your PIN");
       return;
     }
-    setShowPin(false);
     setLoading(true);
     try {
-      // Generate address locally — no network needed
       const net = network || "main";
       const addr = await generateLocalAddress(pin, addressIndex, "generation", net);
       setAddress(addr);
       setAddressIndex(addressIndex + 1);
+      setStep("done");
     } catch (e) {
       toast.error(String(e));
     } finally {
@@ -53,7 +48,9 @@ export default function ReceiveScreen() {
         </p>
       </div>
       <div className="flex-1 flex flex-col items-center justify-center px-4 space-y-4">
-        {address ? (
+
+        {/* Show address + QR if generated */}
+        {address && (
           <>
             <div className="bg-white p-4 rounded-lg">
               <QRCodeSVG value={address} size={200} />
@@ -67,55 +64,69 @@ export default function ReceiveScreen() {
               </div>
             </div>
           </>
-        ) : (
-          <p className="text-sm text-[var(--npt-muted)]">
-            Generate an address to receive NPT.
-          </p>
         )}
 
-        {/* PIN prompt for address generation */}
-        {showPin && (
-          <div className="w-full max-w-xs space-y-3 p-4 rounded-lg bg-[var(--npt-card)] border border-[var(--npt-border)]">
-            <p className="text-xs text-[var(--npt-muted)] text-center">
-              Enter PIN to generate address
-            </p>
+        {/* Step: idle — show Generate button */}
+        {step === "idle" && (
+          <div className="text-center space-y-4">
+            {!address && (
+              <p className="text-sm text-[var(--npt-muted)]">
+                Generate an address to receive NPT.
+              </p>
+            )}
+            <button
+              onClick={() => setStep("pin")}
+              className="px-6 py-3 rounded-lg bg-[var(--npt-blue)] text-white font-semibold active:opacity-80"
+            >
+              {address ? "Generate New Address" : "Generate Address"}
+            </button>
+          </div>
+        )}
+
+        {/* Step: pin — show PIN input */}
+        {step === "pin" && (
+          <div className="w-full max-w-xs space-y-4">
+            <div className="text-center">
+              <h2 className="text-lg font-semibold">Enter PIN</h2>
+              <p className="text-xs text-[var(--npt-muted)]">
+                Required to derive address from your seed
+              </p>
+            </div>
             <input
               type="password"
               inputMode="numeric"
               placeholder="PIN"
               value={pin}
+              autoFocus
               onChange={(e) => setPin(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && doGenerate()}
-              className="w-full px-3 py-2 rounded-lg bg-[var(--npt-dark)] border border-[var(--npt-border)] text-[var(--npt-text)] text-center text-lg tracking-[0.3em] focus:outline-none focus:border-[var(--npt-blue)]"
+              className="w-full px-3 py-3 rounded-lg bg-[var(--npt-card)] border border-[var(--npt-border)] text-[var(--npt-text)] text-center text-2xl tracking-[0.5em] focus:outline-none focus:border-[var(--npt-blue)]"
             />
-            <div className="flex gap-2">
+            <div className="flex gap-3">
               <button
-                onClick={() => { setShowPin(false); setPin(""); }}
-                className="flex-1 py-2 rounded-lg border border-[var(--npt-border)] text-sm text-[var(--npt-muted)]"
+                onClick={() => { setStep(address ? "done" : "idle"); setPin(""); }}
+                className="flex-1 py-3 rounded-lg border border-[var(--npt-border)] text-[var(--npt-muted)] font-semibold"
               >
                 Cancel
               </button>
               <button
                 onClick={doGenerate}
-                className="flex-1 py-2 rounded-lg bg-[var(--npt-blue)] text-white text-sm font-semibold"
+                disabled={loading}
+                className="flex-1 py-3 rounded-lg bg-[var(--npt-blue)] text-white font-semibold disabled:opacity-50"
               >
-                Generate
+                {loading ? "Generating..." : "Generate"}
               </button>
             </div>
           </div>
         )}
 
-        {!showPin && (
+        {/* Step: done — show Generate New button */}
+        {step === "done" && (
           <button
-            onClick={handleGenerate}
-            disabled={loading}
-            className="px-6 py-3 rounded-lg bg-[var(--npt-blue)] text-white font-semibold disabled:opacity-50 active:opacity-80"
+            onClick={() => setStep("pin")}
+            className="px-6 py-3 rounded-lg bg-[var(--npt-card)] border border-[var(--npt-border)] text-[var(--npt-text)] font-semibold active:opacity-80"
           >
-            {loading
-              ? "Generating..."
-              : address
-              ? "Generate New Address"
-              : "Generate Address"}
+            Generate New Address
           </button>
         )}
       </div>
