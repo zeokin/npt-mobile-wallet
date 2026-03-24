@@ -160,6 +160,29 @@ impl RpcClient {
         Ok(false)
     }
 
+    // ── Chain State Endpoints ────────────────────────────────────
+
+    /// Get the current chain tip block (includes mutator set accumulator).
+    /// Method: chain_tip
+    pub async fn get_tip(&self) -> Result<Value, String> {
+        self.call("chain_tip", json!([])).await
+    }
+
+    /// Restore membership proofs for spending UTXOs.
+    /// Method: wallet_restoreMembershipProof
+    pub async fn restore_membership_proof(
+        &self,
+        absolute_index_sets: &Value,
+    ) -> Result<Value, String> {
+        self.call("wallet_restoreMembershipProof", json!([absolute_index_sets])).await
+    }
+
+    /// Submit a locally-built transaction.
+    /// Method: wallet_submitTransaction
+    pub async fn submit_transaction(&self, transaction: &Value) -> Result<Value, String> {
+        self.call("wallet_submitTransaction", json!([transaction])).await
+    }
+
     // ── UTXO Scanning Endpoints ─────────────────────────────────
 
     /// Find blocks containing announcements matching our flags.

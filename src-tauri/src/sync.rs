@@ -19,7 +19,7 @@ use neptune_cash::prelude::triton_vm::prelude::BFieldElement;
 
 use crate::rpc::RpcClient;
 
-/// A discovered UTXO with all data needed for display and later spending.
+/// A discovered UTXO with all data needed for display and spending.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct DiscoveredUtxo {
     /// Display amount.
@@ -32,6 +32,12 @@ pub struct DiscoveredUtxo {
     pub key_type: String,
     /// Derivation index of the key that found this UTXO.
     pub key_index: u64,
+    /// Hex-encoded bincode of the Utxo (for spending).
+    pub utxo_hex: String,
+    /// Hex-encoded bincode of the sender_randomness Digest.
+    pub sender_randomness_hex: String,
+    /// Hex-encoded bincode of the receiver_preimage Digest.
+    pub receiver_preimage_hex: String,
 }
 
 /// Result of a wallet sync operation.
@@ -124,9 +130,20 @@ pub async fn scan_for_utxos(
                 // receiver_id matched — try to decrypt
                 let ciphertext_bfes: Vec<BFieldElement> = ciphertext.to_vec();
                 match key.decrypt(&ciphertext_bfes) {
-                    Ok((utxo, _sender_randomness)) => {
-                        // Extract amount from UTXO
+                    Ok((utxo, sender_randomness)) => {
                         let amount = format_utxo_amount(&utxo);
+                        let receiver_preimage = key.privacy_preimage();
+
+                        // Serialize for later spending
+                        let utxo_hex = hex::encode(
+                            bincode::serialize(&utxo).unwrap_or_default(),
+                        );
+                        let sr_hex = hex::encode(
+                            bincode::serialize(&sender_randomness).unwrap_or_default(),
+                        );
+                        let rp_hex = hex::encode(
+                            bincode::serialize(&receiver_preimage).unwrap_or_default(),
+                        );
 
                         discovered.push(DiscoveredUtxo {
                             amount,
@@ -134,9 +151,12 @@ pub async fn scan_for_utxos(
                             likely_spent: false,
                             key_type: key_type.clone(),
                             key_index: *key_index,
+                            utxo_hex,
+                            sender_randomness_hex: sr_hex,
+                            receiver_preimage_hex: rp_hex,
                         });
                     }
-                    Err(_) => continue, // Decryption failed — not our UTXO
+                    Err(_) => continue,
                 }
             }
         }
