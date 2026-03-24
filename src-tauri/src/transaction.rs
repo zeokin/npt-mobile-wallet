@@ -11,6 +11,7 @@
 use anyhow::Result;
 use itertools::Itertools;
 use neptune_cash::api::export::Tip5;
+use neptune_cash::api::export::TransactionProof;
 use neptune_cash::prelude::tasm_lib;
 use neptune_cash::prelude::triton_vm::proof::Proof;
 use neptune_cash::prelude::triton_vm::prove;
@@ -24,13 +25,14 @@ use neptune_cash::protocol::consensus::transaction::validity::kernel_to_outputs:
 use neptune_cash::protocol::consensus::transaction::validity::proof_collection::ProofCollection;
 use neptune_cash::protocol::consensus::transaction::validity::removal_records_integrity::RemovalRecordsIntegrityWitness;
 use neptune_cash::protocol::consensus::transaction::Transaction;
-use neptune_cash::protocol::consensus::transaction::TransactionProof;
 use neptune_cash::protocol::proof_abstractions::mast_hash::MastHash;
 use neptune_cash::protocol::proof_abstractions::SecretWitness;
-use neptune_cash::state::transaction::transaction_details::TransactionDetails;
 use serde::{Deserialize, Serialize};
 use tasm_lib::triton_vm::prelude::Program;
 use tasm_lib::triton_vm::proof::Claim;
+
+// TransactionDetails is re-exported via api::export
+use neptune_cash::api::export::TransactionDetails;
 
 /// Result of a send operation.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -64,14 +66,6 @@ pub async fn build_transaction(
 }
 
 /// Generate a ProofCollection from a PrimitiveWitness.
-///
-/// This produces 4 + N_lock + N_type individual STARK proofs:
-/// - removal_records_integrity: input UTXOs are in mutator set
-/// - collect_lock_scripts: lock scripts collected correctly
-/// - lock_scripts_halt: each lock script halts (1 per input)
-/// - kernel_to_outputs: kernel matches outputs
-/// - collect_type_scripts: type scripts collected correctly
-/// - type_scripts_halt: each type script halts (1 per type)
 fn produce_proof_collection(
     primitive_witness: &PrimitiveWitness,
 ) -> Result<ProofCollection> {
@@ -86,7 +80,6 @@ fn produce_proof_collection(
     let salted_inputs_hash = Tip5::hash(&primitive_witness.input_utxos);
     let salted_outputs_hash = Tip5::hash(&primitive_witness.output_utxos);
 
-    // Prove each component
     let removal_records_integrity = produce_proof(
         removal_records_integrity_witness.program(),
         removal_records_integrity_witness.claim(),
@@ -115,21 +108,14 @@ fn produce_proof_collection(
     )?
     .into();
 
-    // Prove lock scripts (1 per input UTXO)
     let mut lock_scripts_halt = vec![];
     for lsaw in &primitive_witness.lock_scripts_and_witnesses {
         let claim = Claim::new(lsaw.program.hash())
             .with_input(txk_mast_hash_as_input.clone().individual_tokens);
-        let proof = produce_proof(
-            lsaw.program.clone(),
-            claim,
-            lsaw.nondeterminism(),
-        )?
-        .into();
+        let proof = produce_proof(lsaw.program.clone(), claim, lsaw.nondeterminism())?.into();
         lock_scripts_halt.push(proof);
     }
 
-    // Prove type scripts (1 per type)
     let mut type_scripts_halt = vec![];
     for tsaw in &primitive_witness.type_scripts_and_witnesses {
         let input: Vec<_> = [txk_mast_hash, salted_inputs_hash, salted_outputs_hash]
@@ -141,7 +127,6 @@ fn produce_proof_collection(
         type_scripts_halt.push(proof);
     }
 
-    // Collect hashes
     let lock_script_hashes = primitive_witness
         .lock_scripts_and_witnesses
         .iter()
@@ -173,13 +158,7 @@ fn produce_proof_collection(
     })
 }
 
-/// Run the Triton VM prover for a single claim.
-fn produce_proof(
-    program: Program,
-    claim: Claim,
-    non_determinism: NonDeterminism,
-) -> Result<Proof> {
+fn produce_proof(program: Program, claim: Claim, non_determinism: NonDeterminism) -> Result<Proof> {
     let stark = Stark::default();
-    let proof = prove(stark, &claim, program, non_determinism)?;
-    Ok(proof)
+    Ok(prove(stark, &claim, program, non_determinism)?)
 }

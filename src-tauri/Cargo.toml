@@ -20,6 +20,7 @@ serde_json = "1"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 tokio = { version = "1", features = ["full"] }
 anyhow = "1"
+itertools = "0.14"
 
 # Neptune-core types for local key derivation and transaction building.
 # This is the critical dependency — gives us SecretKeyMaterial, WalletEntropy,
