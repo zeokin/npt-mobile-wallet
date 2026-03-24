@@ -24,7 +24,10 @@ anyhow = "1"
 # Neptune-core types for local key derivation and transaction building.
 # This is the critical dependency — gives us SecretKeyMaterial, WalletEntropy,
 # GenerationSpendingKey, ReceivingAddress, etc.
-neptune-cash = { git = "https://github.com/Neptune-Crypto/neptune-core.git", tag = "v0.7.0" }
+# Use downstream-vxb-wallet-compatibility branch — makes TransactionDetails::new_without_coinbase()
+# and PrimitiveWitness::from_transaction_details() public for downstream wallets.
+# This branch was created by Thorkil specifically for wallet apps like ours.
+neptune-cash = { git = "https://github.com/Neptune-Crypto/neptune-core.git", branch = "downstream-vxb-wallet-compatibility" }
 
 # Seed management
 bip39 = "2.1"
