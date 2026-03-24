@@ -1,14 +1,9 @@
 import { useState } from "react";
 import { toast } from "sonner";
-import { QRCodeSVG } from "qrcode.react";
 import { Copy } from "lucide-react";
 import { generateLocalAddress } from "../api/rpc";
 import { useSettingsStore } from "../store/settings-store";
 import NavBar from "../components/ui/NavBar";
-
-// QR codes can hold ~4,296 alphanumeric chars at level L.
-// Neptune Generation addresses can be very long (lattice KEM keys).
-const MAX_QR_LENGTH = 4000;
 
 export default function ReceiveScreen() {
   const [address, setAddress] = useState("");
@@ -43,7 +38,8 @@ export default function ReceiveScreen() {
     toast.success("Address copied!");
   };
 
-  const canShowQR = address.length > 0 && address.length <= MAX_QR_LENGTH;
+  // Neptune Generation addresses are too long for QR codes (lattice KEM keys).
+  // QR code support can be added for Symmetric key addresses which are shorter.
 
   return (
     <div className="flex flex-col h-full">
@@ -58,17 +54,11 @@ export default function ReceiveScreen() {
         {/* Show address if generated */}
         {address && (
           <>
-            {canShowQR ? (
-              <div className="bg-white p-3 rounded-lg">
-                <QRCodeSVG value={address} size={180} level="L" />
-              </div>
-            ) : (
-              <div className="p-3 rounded-lg bg-yellow-500/10 border border-yellow-500/30">
-                <p className="text-xs text-yellow-400 text-center">
-                  Address too long for QR code — use copy button below
-                </p>
-              </div>
-            )}
+            <div className="p-3 rounded-lg bg-[var(--npt-blue)]/10 border border-[var(--npt-blue)]/30">
+              <p className="text-xs text-[var(--npt-blue)] text-center">
+                Share this address with the sender
+              </p>
+            </div>
             <div className="w-full max-w-sm">
               <div className="flex items-start gap-2 p-3 rounded-lg bg-[var(--npt-card)] border border-[var(--npt-border)]">
                 <p className="flex-1 text-xs font-mono break-all max-h-32 overflow-y-auto">
