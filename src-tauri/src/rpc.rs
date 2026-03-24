@@ -139,14 +139,25 @@ impl RpcClient {
 
     pub async fn validate_address(&self, address: &str) -> Result<bool, String> {
         let result = self.call("wallet_validateAddress", json!([address])).await?;
-        // Response might be bool directly or wrapped
+        // Response formats:
+        // - bool: true/false
+        // - object with addressType: {"addressType":"generation",...} means valid
+        // - object with "valid" field
         if let Some(b) = result.as_bool() {
             return Ok(b);
         }
         if let Some(b) = result.get("valid").and_then(|v| v.as_bool()) {
             return Ok(b);
         }
-        Err(format!("Invalid validation response: {}", result))
+        // If response has "addressType", the address is valid
+        if result.get("addressType").is_some() || result.get("address_type").is_some() {
+            return Ok(true);
+        }
+        // If we got any non-error response, address is valid
+        if result.is_object() && !result.get("error").is_some() {
+            return Ok(true);
+        }
+        Ok(false)
     }
 
     // ── UTXO Scanning Endpoints ─────────────────────────────────
