@@ -1,22 +1,21 @@
 //! Transaction building module — constructs and broadcasts transactions locally.
 //!
-//! Flow:
-//! 1. Select input UTXOs from local store
-//! 2. Create output UTXOs (recipient + change)
-//! 3. Fetch membership proofs + mutator set accumulator from supporter
-//! 4. Build TransactionDetails → PrimitiveWitness
-//! 5. Generate ProofCollection (STARK proofs via Triton VM) — CPU intensive
-//! 6. Submit via wallet_submitTransaction RPC
+//! Uses two-step proving approach (adapted from XNT wallet):
+//! 1. VM::trace_execution() — fast, just runs the program
+//! 2. Check padded_height complexity against limit
+//! 3. If within limit → stark.prove() — the expensive STARK proof
+//! 4. If over limit → fast fail with clear error message
+//!
+//! This prevents mobile devices from attempting proofs that would
+//! take too long or crash with OOM.
 
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use itertools::Itertools;
 use neptune_cash::api::export::Tip5;
 use neptune_cash::api::export::TransactionProof;
-use neptune_cash::prelude::tasm_lib;
 use neptune_cash::prelude::triton_vm::proof::Proof;
-use neptune_cash::prelude::triton_vm::prove;
 use neptune_cash::prelude::triton_vm::stark::Stark;
-use neptune_cash::prelude::triton_vm::vm::{NonDeterminism, PublicInput};
+use neptune_cash::prelude::triton_vm::vm::{NonDeterminism, PublicInput, VM};
 use neptune_cash::protocol::consensus::transaction::primitive_witness::PrimitiveWitness;
 use neptune_cash::protocol::consensus::transaction::transaction_kernel::TransactionKernelField;
 use neptune_cash::protocol::consensus::transaction::validity::collect_lock_scripts::CollectLockScriptsWitness;
@@ -31,8 +30,13 @@ use serde::{Deserialize, Serialize};
 use tasm_lib::triton_vm::prelude::Program;
 use tasm_lib::triton_vm::proof::Claim;
 
-// TransactionDetails is re-exported via api::export
 use neptune_cash::api::export::TransactionDetails;
+use neptune_cash::prelude::tasm_lib;
+
+/// Maximum log2 padded height for mobile proof generation.
+/// 2^23 = 8,388,608 rows — matches XNT's limit.
+/// Proofs exceeding this would likely OOM or take too long on mobile.
+const MAX_LOG2_PADDED_HEIGHT: u8 = 23;
 
 /// Result of a send operation.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -43,19 +47,16 @@ pub struct SendResult {
 
 /// Build a Transaction from TransactionDetails.
 ///
-/// This generates a ProofCollection (multiple STARK proofs) which is
-/// CPU-intensive and may take several minutes.
+/// Uses two-step approach: trace first (fast), then prove (slow).
+/// Fails fast if any proof exceeds the mobile complexity limit.
 pub async fn build_transaction(
     transaction_details: &TransactionDetails,
 ) -> Result<Transaction> {
-    let primitive_witness =
-        PrimitiveWitness::from_transaction_details(transaction_details);
-
+    let primitive_witness = PrimitiveWitness::from_transaction_details(transaction_details);
     let kernel = primitive_witness.kernel.clone();
 
-    // Generate ProofCollection in a blocking task to avoid blocking the async runtime
     let proof = tokio::task::spawn_blocking(move || {
-        produce_proof_collection(&primitive_witness)
+        produce_proof_collection(&primitive_witness, Some(MAX_LOG2_PADDED_HEIGHT))
     })
     .await??;
 
@@ -65,9 +66,13 @@ pub async fn build_transaction(
     })
 }
 
-/// Generate a ProofCollection from a PrimitiveWitness.
+/// Generate a ProofCollection with optional complexity limit.
+///
+/// If `max_log2_padded_height` is Some, each proof is checked after
+/// VM execution but BEFORE the expensive STARK proving step.
 fn produce_proof_collection(
     primitive_witness: &PrimitiveWitness,
+    max_log2_padded_height: Option<u8>,
 ) -> Result<ProofCollection> {
     let removal_records_integrity_witness =
         RemovalRecordsIntegrityWitness::from(primitive_witness);
@@ -80,50 +85,75 @@ fn produce_proof_collection(
     let salted_inputs_hash = Tip5::hash(&primitive_witness.input_utxos);
     let salted_outputs_hash = Tip5::hash(&primitive_witness.output_utxos);
 
-    let removal_records_integrity = produce_proof(
+    // Prove each component with complexity check
+    let removal_records_integrity = prove_with_limit(
         removal_records_integrity_witness.program(),
         removal_records_integrity_witness.claim(),
         removal_records_integrity_witness.nondeterminism(),
+        max_log2_padded_height,
+        "RemovalRecordsIntegrity",
     )?
     .into();
 
-    let collect_lock_scripts = produce_proof(
+    let collect_lock_scripts = prove_with_limit(
         collect_lock_scripts_witness.program(),
         collect_lock_scripts_witness.claim(),
         collect_lock_scripts_witness.nondeterminism(),
+        max_log2_padded_height,
+        "CollectLockScripts",
     )?
     .into();
 
-    let kernel_to_outputs = produce_proof(
+    let kernel_to_outputs = prove_with_limit(
         kernel_to_outputs_witness.program(),
         kernel_to_outputs_witness.claim(),
         kernel_to_outputs_witness.nondeterminism(),
+        max_log2_padded_height,
+        "KernelToOutputs",
     )?
     .into();
 
-    let collect_type_scripts = produce_proof(
+    let collect_type_scripts = prove_with_limit(
         collect_type_scripts_witness.program(),
         collect_type_scripts_witness.claim(),
         collect_type_scripts_witness.nondeterminism(),
+        max_log2_padded_height,
+        "CollectTypeScripts",
     )?
     .into();
 
+    // Prove lock scripts (1 per input UTXO)
     let mut lock_scripts_halt = vec![];
-    for lsaw in &primitive_witness.lock_scripts_and_witnesses {
+    for (i, lsaw) in primitive_witness.lock_scripts_and_witnesses.iter().enumerate() {
         let claim = Claim::new(lsaw.program.hash())
             .with_input(txk_mast_hash_as_input.clone().individual_tokens);
-        let proof = produce_proof(lsaw.program.clone(), claim, lsaw.nondeterminism())?.into();
+        let proof = prove_with_limit(
+            lsaw.program.clone(),
+            claim,
+            lsaw.nondeterminism(),
+            max_log2_padded_height,
+            &format!("LockScript[{}]", i),
+        )?
+        .into();
         lock_scripts_halt.push(proof);
     }
 
+    // Prove type scripts (1 per type)
     let mut type_scripts_halt = vec![];
-    for tsaw in &primitive_witness.type_scripts_and_witnesses {
+    for (i, tsaw) in primitive_witness.type_scripts_and_witnesses.iter().enumerate() {
         let input: Vec<_> = [txk_mast_hash, salted_inputs_hash, salted_outputs_hash]
             .into_iter()
             .flat_map(|d| d.reversed().values())
             .collect();
         let claim = Claim::new(tsaw.program.hash()).with_input(input);
-        let proof = produce_proof(tsaw.program.clone(), claim, tsaw.nondeterminism())?.into();
+        let proof = prove_with_limit(
+            tsaw.program.clone(),
+            claim,
+            tsaw.nondeterminism(),
+            max_log2_padded_height,
+            &format!("TypeScript[{}]", i),
+        )?
+        .into();
         type_scripts_halt.push(proof);
     }
 
@@ -158,7 +188,53 @@ fn produce_proof_collection(
     })
 }
 
-fn produce_proof(program: Program, claim: Claim, non_determinism: NonDeterminism) -> Result<Proof> {
+/// Two-step prove: trace execution first, check complexity, then prove.
+///
+/// Step 1: VM::trace_execution() — fast, just runs the program
+/// Step 2: Check padded_height against limit — instant
+/// Step 3: stark.prove() — expensive STARK proof generation
+///
+/// If complexity exceeds limit, returns error BEFORE the expensive step.
+fn prove_with_limit(
+    program: Program,
+    claim: Claim,
+    non_determinism: NonDeterminism,
+    max_log2_padded_height: Option<u8>,
+    proof_name: &str,
+) -> Result<Proof> {
+    // Step 1: Trace execution (fast)
+    let claim_input = claim.input.clone();
+    let (aet, public_output) =
+        VM::trace_execution(program.clone(), claim_input.into(), non_determinism.clone())
+            .map_err(|e| anyhow!("{} VM execution failed: {}", proof_name, e))?;
+
+    // Verify output matches claim
+    if public_output != claim.output {
+        return Err(anyhow!(
+            "{} VM output does not match claim output",
+            proof_name
+        ));
+    }
+
+    // Step 2: Check complexity (instant)
+    let log2_padded_height = aet.padded_height().ilog2() as u8;
+    if let Some(max) = max_log2_padded_height {
+        if log2_padded_height > max {
+            return Err(anyhow!(
+                "{} proof too complex for mobile: 2^{} rows exceeds limit 2^{}. \
+                 Try a simpler transaction or use a desktop wallet.",
+                proof_name,
+                log2_padded_height,
+                max
+            ));
+        }
+    }
+
+    // Step 3: STARK prove (expensive)
     let stark = Stark::default();
-    Ok(prove(stark, &claim, program, non_determinism)?)
+    let proof = stark
+        .prove(&claim, &aet)
+        .map_err(|e| anyhow!("{} STARK proving failed: {}", proof_name, e))?;
+
+    Ok(proof)
 }
