@@ -2,6 +2,7 @@ mod keys;
 mod rpc;
 mod seed;
 mod sync;
+mod transaction;
 
 use rpc::RpcClient;
 use serde::Serialize;
