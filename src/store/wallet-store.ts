@@ -1,36 +1,58 @@
 import { create } from "zustand";
-
-interface TxEntry {
-  amount: string;
-  address: string;
-  block_height: number;
-  timestamp: number;
-}
+import { persist } from "zustand/middleware";
+import type { DiscoveredUtxo } from "../api/rpc";
 
 interface WalletState {
   balance: string;
-  incoming: TxEntry[];
-  outgoing: TxEntry[];
+  utxos: DiscoveredUtxo[];
+  outgoingTxs: OutgoingTx[];
   loading: boolean;
   error: string | null;
+  lastSyncHeight: number;
   setBalance: (balance: string) => void;
-  setIncoming: (txs: TxEntry[]) => void;
-  setOutgoing: (txs: TxEntry[]) => void;
+  setUtxos: (utxos: DiscoveredUtxo[]) => void;
+  addOutgoingTx: (tx: OutgoingTx) => void;
   setLoading: (loading: boolean) => void;
   setError: (error: string | null) => void;
+  setLastSyncHeight: (height: number) => void;
   reset: () => void;
 }
 
-export const useWalletStore = create<WalletState>()((set) => ({
-  balance: "0",
-  incoming: [],
-  outgoing: [],
-  loading: false,
-  error: null,
-  setBalance: (balance) => set({ balance }),
-  setIncoming: (incoming) => set({ incoming }),
-  setOutgoing: (outgoing) => set({ outgoing }),
-  setLoading: (loading) => set({ loading }),
-  setError: (error) => set({ error }),
-  reset: () => set({ balance: "0", incoming: [], outgoing: [], loading: false, error: null }),
-}));
+export interface OutgoingTx {
+  txid: string;
+  recipient: string;
+  amount: string;
+  fee: string;
+  timestamp: number;
+  status: "pending" | "confirmed";
+}
+
+export const useWalletStore = create<WalletState>()(
+  persist(
+    (set) => ({
+      balance: "0",
+      utxos: [],
+      outgoingTxs: [],
+      loading: false,
+      error: null,
+      lastSyncHeight: 0,
+      setBalance: (balance) => set({ balance }),
+      setUtxos: (utxos) => set({ utxos }),
+      addOutgoingTx: (tx) =>
+        set((state) => ({ outgoingTxs: [tx, ...state.outgoingTxs] })),
+      setLoading: (loading) => set({ loading }),
+      setError: (error) => set({ error }),
+      setLastSyncHeight: (height) => set({ lastSyncHeight: height }),
+      reset: () =>
+        set({
+          balance: "0",
+          utxos: [],
+          outgoingTxs: [],
+          loading: false,
+          error: null,
+          lastSyncHeight: 0,
+        }),
+    }),
+    { name: "npt-wallet" }
+  )
+);

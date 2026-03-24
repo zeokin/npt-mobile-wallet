@@ -30,9 +30,11 @@ export interface DiscoveredUtxo {
   amount: string;
   block_height: number;
   likely_spent: boolean;
-  incoming_utxo_hex: string;
   key_type: string;
   key_index: number;
+  utxo_hex: string;
+  sender_randomness_hex: string;
+  receiver_preimage_hex: string;
 }
 export const syncWallet = (pin: string, numKeys?: number) =>
   invoke<SyncResult>("sync_wallet", { pin, numKeys: numKeys || null });

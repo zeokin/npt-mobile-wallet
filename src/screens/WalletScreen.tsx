@@ -10,7 +10,7 @@ import NavBar from "../components/ui/NavBar";
 export default function WalletScreen() {
   const navigate = useNavigate();
   const { network, blockHeight, connected, setConnected } = useSettingsStore();
-  const { balance, setBalance } = useWalletStore();
+  const { balance, setBalance, setUtxos } = useWalletStore();
   const [syncing, setSyncing] = useState(false);
   const [syncInfo, setSyncInfo] = useState<string | null>(null);
   const [pinForSync, setPinForSync] = useState("");
@@ -49,6 +49,7 @@ export default function WalletScreen() {
     try {
       const result = await syncWallet(pinForSync, 5);
       setBalance(result.balance);
+      setUtxos(result.utxos);
       setSyncInfo(
         `Found ${result.utxo_count} UTXOs in ${result.blocks_scanned} blocks`
       );
