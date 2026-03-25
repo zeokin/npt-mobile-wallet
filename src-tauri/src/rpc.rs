@@ -195,8 +195,10 @@ impl RpcClient {
             .map_err(|e| format!("Serialize flags: {}", e))?;
 
         // Debug: log what we're sending
-        eprintln!("[DEBUG] blockHeightsByFlags params: {}",
-            serde_json::to_string_pretty(&json!([flags_json])).unwrap_or_default());
+        eprintln!("[DEBUG] blockHeightsByFlags flags_json: {}",
+            serde_json::to_string(&flags_json).unwrap_or_default());
+        eprintln!("[DEBUG] blockHeightsByFlags full params: {}",
+            serde_json::to_string(&json!([flags_json])).unwrap_or_default());
 
         let result = self.call("utxoindex_blockHeightsByFlags", json!([flags_json])).await?;
 
