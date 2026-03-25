@@ -191,25 +191,19 @@ impl RpcClient {
         &self,
         flags: &[neptune_cash::state::wallet::address::announcement_flag::AnnouncementFlag],
     ) -> Result<Vec<u64>, String> {
-        let flags_json = serde_json::to_value(flags)
-            .map_err(|e| format!("Serialize flags: {}", e))?;
+        // Use neptune-cash's own request type to ensure exact serialization format
+        use neptune_cash::application::json_rpc::core::model::message::BlockHeightsByFlagsRequest;
 
-        eprintln!("[DEBUG] blockHeightsByFlags trying tuple params: {}",
-            serde_json::to_string(&json!([flags_json])).unwrap_or_default());
-
-        // Try tuple-wrapped format first: [[{flag, receiver_id}, ...]]
-        let result = match self.call("utxoindex_blockHeightsByFlags", json!([flags_json])).await {
-            Ok(r) => Ok(r),
-            Err(e) if e.contains("-32602") || e.contains("Invalid params") => {
-                // Try flat format: [{flag, receiver_id}, ...]
-                eprintln!("[DEBUG] Tuple params failed, trying flat: {}",
-                    serde_json::to_string(&flags_json).unwrap_or_default());
-                self.call("utxoindex_blockHeightsByFlags", flags_json.clone()).await
-            }
-            Err(e) => Err(e),
+        let request = BlockHeightsByFlagsRequest {
+            announcement_flags: flags.to_vec(),
         };
+        let params = serde_json::to_value(&request)
+            .map_err(|e| format!("Serialize request: {}", e))?;
 
-        let result = match result {
+        eprintln!("[DEBUG] blockHeightsByFlags params: {}",
+            serde_json::to_string(&params).unwrap_or_default());
+
+        let result = match self.call("utxoindex_blockHeightsByFlags", params).await {
             Ok(r) => r,
             Err(e) => {
                 eprintln!("[DEBUG] blockHeightsByFlags error: {}", e);
