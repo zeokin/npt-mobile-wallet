@@ -414,13 +414,93 @@ async fn send_transaction(
     };
 
     eprintln!("[SEND] AOCL leaf index: {}", aocl_leaf_index);
-    eprintln!("[SEND] Step 5: TODO - restore membership proof + build tx + generate proofs");
+
+    // Step 5: Compute AbsoluteIndexSet
+    eprintln!("[SEND] Step 5: Computing AbsoluteIndexSet...");
+    use neptune_cash::util_types::mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
+
+    let abs_index_set = AbsoluteIndexSet::compute(
+        utxo_hash,
+        input_sender_randomnesses[0],
+        input_receiver_preimages[0],
+        aocl_leaf_index,
+    );
+    eprintln!("[SEND] AbsoluteIndexSet computed");
+
+    // Step 6: Restore membership proof
+    eprintln!("[SEND] Step 6: Restoring membership proof from supporter...");
+    let abs_sets_json = serde_json::to_value(&vec![abs_index_set])
+        .map_err(|e| format!("Serialize AbsoluteIndexSet: {}", e))?;
+    let proof_response = rpc.restore_membership_proof(&abs_sets_json).await?;
+    eprintln!("[SEND] Membership proof restored");
+
+    // Step 7: Build TransactionDetails
+    eprintln!("[SEND] Step 7: Building TransactionDetails...");
+
+    // Create output for recipient (on-chain notification)
+    use neptune_cash::state::wallet::transaction_output::TxOutput;
+    use neptune_cash::state::wallet::utxo_notification::UtxoNotificationMedium;
+    use neptune_cash::protocol::proof_abstractions::timestamp::Timestamp;
+    use neptune_cash::protocol::consensus::block::block_height::BlockHeight;
+
+    let tip_block_height = BlockHeight::from(tip_height);
+    let change_key = neptune_cash::state::wallet::address::SpendingKey::Symmetric(
+        entropy.nth_symmetric_key(0)
+    );
+    let change_address = change_key.to_address();
+
+    // Generate sender randomness for outputs
+    let recipient_privacy_digest = recipient.privacy_digest();
+    let recipient_sender_randomness = entropy.generate_sender_randomness(
+        tip_block_height, recipient_privacy_digest
+    );
+
+    let recipient_output = TxOutput::onchain_native_currency(
+        amount_val,
+        recipient_sender_randomness,
+        recipient,
+        false, // not owned by us
+    );
+
+    // Calculate change
+    let input_total = input_utxos[0].get_native_currency_amount();
+    let spend_total = amount_val + fee_val;
+
+    let mut tx_outputs = neptune_cash::state::wallet::transaction_output::TxOutputList::from(
+        vec![recipient_output]
+    );
+
+    if input_total > spend_total {
+        let change_amount = input_total - spend_total;
+        let change_privacy_digest = change_address.privacy_digest();
+        let change_sender_randomness = entropy.generate_sender_randomness(
+            tip_block_height, change_privacy_digest
+        );
+        let change_output = TxOutput::onchain_native_currency(
+            change_amount,
+            change_sender_randomness,
+            change_address.into(),
+            true, // owned by us
+        );
+        tx_outputs.push(change_output);
+    }
+
+    eprintln!("[SEND] TransactionDetails: {} inputs, {} outputs, fee: {}",
+        1, tx_outputs.len(), fee);
+
+    // For now, report success up to this point
+    // The next step would be:
+    // - Parse the membership proof from the RPC response
+    // - Build full TransactionDetails with UnlockedUtxo
+    // - Generate ProofCollection (takes minutes)
+    // - Submit transaction
+    // This requires deserializing the membership proof response which is complex.
 
     Err(format!(
-        "Progress: UTXO found at AOCL index {}. \
-         Next: restore_membership_proof → TransactionDetails → ProofCollection. \
-         Tip: {}, Block: {}, Outputs: {}",
-        aocl_leaf_index, tip_height, utxo_block_height, outputs.len()
+        "Progress: AOCL index {}, membership proof restored, \
+         {} outputs created. Next: deserialize proof + ProofCollection generation. \
+         This is the CPU-intensive step that may take several minutes.",
+        aocl_leaf_index, tx_outputs.len()
     ))
 }
 
