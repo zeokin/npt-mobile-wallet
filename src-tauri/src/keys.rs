@@ -107,6 +107,29 @@ mod tests {
     }
 
     #[test]
+    fn test_announcement_flag_serialization() {
+        use neptune_cash::api::export::KeyType;
+        use neptune_cash::state::wallet::address::announcement_flag::AnnouncementFlag;
+        use neptune_cash::state::wallet::address::ReceivingAddress;
+
+        let words = test_phrase();
+        let entropy = wallet_entropy_from_phrase(&words).unwrap();
+        let addr: ReceivingAddress = entropy.nth_receiving_address(0, KeyType::Generation);
+        let flag = AnnouncementFlag::from(&addr);
+
+        let flag_json = serde_json::to_value(&flag).unwrap();
+        println!("Single flag JSON: {}", serde_json::to_string_pretty(&flag_json).unwrap());
+
+        let flags = vec![flag];
+        let flags_json = serde_json::to_value(&flags).unwrap();
+        println!("Vec<flag> JSON: {}", serde_json::to_string_pretty(&flags_json).unwrap());
+
+        // This is what the RPC params should look like (tuple struct wrapping)
+        let params = serde_json::json!([flags_json]);
+        println!("RPC params: {}", serde_json::to_string(&params).unwrap());
+    }
+
+    #[test]
     fn test_invalid_key_type() {
         let words = test_phrase();
         let entropy = wallet_entropy_from_phrase(&words).unwrap();

@@ -195,12 +195,24 @@ impl RpcClient {
             .map_err(|e| format!("Serialize flags: {}", e))?;
 
         // Debug: log what we're sending
-        eprintln!("[DEBUG] blockHeightsByFlags flags_json: {}",
-            serde_json::to_string(&flags_json).unwrap_or_default());
-        eprintln!("[DEBUG] blockHeightsByFlags full params: {}",
+        eprintln!("[DEBUG] blockHeightsByFlags params: {}",
             serde_json::to_string(&json!([flags_json])).unwrap_or_default());
 
-        let result = self.call("utxoindex_blockHeightsByFlags", json!([flags_json])).await?;
+        let result = match self.call("utxoindex_blockHeightsByFlags", json!([flags_json])).await {
+            Ok(r) => r,
+            Err(e) => {
+                eprintln!("[DEBUG] blockHeightsByFlags error: {}", e);
+                // If utxoindex is not available, return empty — the UTXO index
+                // namespace might not be enabled on this supporter
+                if e.contains("-32601") || e.contains("Method not found") {
+                    return Err(
+                        "Supporter does not have UTXO index enabled. \
+                         Ask the node operator to run with --utxo-index flag.".to_string()
+                    );
+                }
+                return Err(e);
+            }
+        };
 
         // Response: {"block_heights": [1, 2, 3]} or {"blockHeights": [...]}
         let heights = result
