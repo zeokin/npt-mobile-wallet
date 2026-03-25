@@ -418,6 +418,14 @@ async fn send_transaction(
     // Step 5: Compute AbsoluteIndexSet
     eprintln!("[SEND] Step 5: Computing AbsoluteIndexSet...");
     use neptune_cash::util_types::mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
+    use neptune_cash::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
+    use neptune_cash::application::json_rpc::core::model::wallet::mutator_set::RpcMsMembershipSnapshot;
+    use neptune_cash::application::json_rpc::core::model::message::RestoreMembershipProofRequest;
+    use neptune_cash::api::export::UnlockedUtxo;
+    use neptune_cash::state::wallet::transaction_output::TxOutput;
+    use neptune_cash::protocol::proof_abstractions::timestamp::Timestamp;
+    use neptune_cash::protocol::consensus::block::block_height::BlockHeight;
+    use num_traits::{CheckedAdd, CheckedSub, Zero};
 
     let abs_index_set = AbsoluteIndexSet::compute(
         utxo_hash,
@@ -427,92 +435,112 @@ async fn send_transaction(
     );
     eprintln!("[SEND] AbsoluteIndexSet computed");
 
-    // Step 6: Restore membership proof
-    eprintln!("[SEND] Step 6: Restoring membership proof from supporter...");
-    let abs_sets_json = serde_json::to_value(&vec![abs_index_set])
-        .map_err(|e| format!("Serialize AbsoluteIndexSet: {}", e))?;
-    let proof_response = rpc.restore_membership_proof(&abs_sets_json).await?;
-    eprintln!("[SEND] Membership proof restored");
+    // Step 6: Restore membership proof from supporter
+    eprintln!("[SEND] Step 6: Restoring membership proof...");
+    let restore_request = RestoreMembershipProofRequest {
+        absolute_index_sets: vec![abs_index_set],
+    };
+    let restore_params = serde_json::to_value(&restore_request)
+        .map_err(|e| format!("Serialize restore request: {}", e))?;
+    let proof_response_json = rpc.restore_membership_proof(&restore_params).await?;
 
-    // Step 7: Build TransactionDetails
-    eprintln!("[SEND] Step 7: Building TransactionDetails...");
+    // Parse the response
+    let snapshot_json = proof_response_json.get("snapshot")
+        .cloned()
+        .unwrap_or(proof_response_json.clone());
+    let snapshot: RpcMsMembershipSnapshot = serde_json::from_value(snapshot_json)
+        .map_err(|e| format!("Parse membership snapshot: {}", e))?;
 
-    // Create output for recipient (on-chain notification)
-    use neptune_cash::state::wallet::transaction_output::TxOutput;
-    use neptune_cash::state::wallet::utxo_notification::UtxoNotificationMedium;
-    use neptune_cash::protocol::proof_abstractions::timestamp::Timestamp;
-    use neptune_cash::protocol::consensus::block::block_height::BlockHeight;
+    let privacy_proof = snapshot.membership_proofs.into_iter().next()
+        .ok_or("No membership proof in response")?;
 
+    let membership_proof = privacy_proof
+        .extract_ms_membership_proof(
+            aocl_leaf_index,
+            input_sender_randomnesses[0],
+            input_receiver_preimages[0],
+        )
+        .ok_or("Failed to extract membership proof — AOCL index may be wrong")?;
+
+    let tip_msa: MutatorSetAccumulator = snapshot.synced_mutator_set.into();
+    eprintln!("[SEND] Membership proof extracted");
+
+    // Step 7: Create UnlockedUtxo
+    eprintln!("[SEND] Step 7: Creating UnlockedUtxo...");
+    let spending_key = neptune_cash::state::wallet::address::SpendingKey::Generation(
+        entropy.nth_generation_spending_key(sync_result.utxos[0].key_index)
+    );
+    let lock_script_and_witness = spending_key.lock_script_and_witness();
+    let unlocked = UnlockedUtxo::unlock(
+        input_utxos[0].clone(),
+        lock_script_and_witness,
+        membership_proof,
+    );
+    eprintln!("[SEND] UnlockedUtxo created");
+
+    // Step 8: Build outputs
+    eprintln!("[SEND] Step 8: Building outputs...");
     let tip_block_height = BlockHeight::from(tip_height);
     let change_key = neptune_cash::state::wallet::address::SpendingKey::Symmetric(
         entropy.nth_symmetric_key(0)
     );
     let change_address = change_key.to_address();
 
-    // Generate sender randomness for outputs
     let recipient_privacy_digest = recipient.privacy_digest();
     let recipient_sender_randomness = entropy.generate_sender_randomness(
         tip_block_height, recipient_privacy_digest
     );
-
     let recipient_output = TxOutput::onchain_native_currency(
-        amount_val,
-        recipient_sender_randomness,
-        recipient,
-        false, // not owned by us
+        amount_val, recipient_sender_randomness, recipient, false,
     );
 
-    // Calculate change
-    use num_traits::{CheckedAdd, CheckedSub, Zero};
     let input_total = input_utxos[0].get_native_currency_amount();
-    let spend_total = amount_val.checked_add(&fee_val)
-        .ok_or("Amount + fee overflow")?;
-
+    let spend_total = amount_val.checked_add(&fee_val).ok_or("Amount + fee overflow")?;
     if input_total < spend_total {
-        return Err(format!(
-            "Insufficient balance: have {}, need {} (amount {} + fee {})",
-            input_total, spend_total, amount_val, fee_val
-        ));
+        return Err(format!("Insufficient balance: have {}, need {}", input_total, spend_total));
     }
 
     let mut tx_outputs = neptune_cash::state::wallet::transaction_output::TxOutputList::from(
         vec![recipient_output]
     );
-
-    let change_amount_opt = input_total.checked_sub(&spend_total);
-    if let Some(change_amount) = change_amount_opt {
+    if let Some(change_amount) = input_total.checked_sub(&spend_total) {
         if change_amount > neptune_cash::api::export::NativeCurrencyAmount::zero() {
-        let change_privacy_digest = change_address.privacy_digest();
-        let change_sender_randomness = entropy.generate_sender_randomness(
-            tip_block_height, change_privacy_digest
-        );
-        let change_output = TxOutput::onchain_native_currency(
-            change_amount,
-            change_sender_randomness,
-            change_address.into(),
-            true, // owned by us
-        );
-        tx_outputs.push(change_output);
+            let change_privacy_digest = change_address.privacy_digest();
+            let change_sender_randomness = entropy.generate_sender_randomness(
+                tip_block_height, change_privacy_digest
+            );
+            let change_output = TxOutput::onchain_native_currency(
+                change_amount, change_sender_randomness, change_address.into(), true,
+            );
+            tx_outputs.push(change_output);
         }
     }
+    eprintln!("[SEND] {} outputs created", tx_outputs.len());
 
-    eprintln!("[SEND] TransactionDetails: {} inputs, {} outputs, fee: {}",
-        1, tx_outputs.len(), fee);
+    // Step 9: Build TransactionDetails
+    eprintln!("[SEND] Step 9: Building TransactionDetails...");
+    let timestamp = Timestamp::now();
+    let transaction_details = neptune_cash::api::export::TransactionDetails::new_without_coinbase(
+        vec![unlocked], tx_outputs, fee_val, timestamp, tip_msa, network,
+    );
+    eprintln!("[SEND] TransactionDetails built");
 
-    // For now, report success up to this point
-    // The next step would be:
-    // - Parse the membership proof from the RPC response
-    // - Build full TransactionDetails with UnlockedUtxo
-    // - Generate ProofCollection (takes minutes)
-    // - Submit transaction
-    // This requires deserializing the membership proof response which is complex.
+    // Step 10: Generate ProofCollection (THIS IS THE SLOW STEP)
+    eprintln!("[SEND] Step 10: Generating ProofCollection — this may take several minutes...");
+    let tx = transaction::build_transaction(&transaction_details).await
+        .map_err(|e| format!("ProofCollection failed: {}", e))?;
+    eprintln!("[SEND] Transaction built!");
 
-    Err(format!(
-        "Progress: AOCL index {}, membership proof restored, \
-         {} outputs created. Next: deserialize proof + ProofCollection generation. \
-         This is the CPU-intensive step that may take several minutes.",
-        aocl_leaf_index, tx_outputs.len()
-    ))
+    // Step 11: Submit transaction
+    eprintln!("[SEND] Step 11: Submitting transaction...");
+    let rpc_tx: neptune_cash::application::json_rpc::core::model::wallet::transaction::RpcTransaction = tx.try_into()
+        .map_err(|e: String| format!("Convert to RPC transaction: {}", e))?;
+    let tx_json = serde_json::to_value(&rpc_tx)
+        .map_err(|e| format!("Serialize transaction: {}", e))?;
+    let submit_result = rpc.submit_transaction(&tx_json).await?;
+    eprintln!("[SEND] Submitted! Response: {}", submit_result);
+
+    Ok(format!("Transaction sent successfully!"))
 }
 
 /// Scan the blockchain for UTXOs belonging to this wallet.
