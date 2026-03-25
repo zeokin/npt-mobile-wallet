@@ -356,20 +356,27 @@ async fn send_transaction(
 
     eprintln!("[SEND] Block has {} outputs, looking for our commitment...", outputs.len());
 
-    let mut our_output_index: Option<usize> = None;
-    let expected_hex = format!("{}", expected_commitment.canonical_commitment);
+    // Convert our expected commitment to hex format for comparison
+    // Digest values are 5 BFieldElements, each serialized as 16 hex chars
+    let expected_bfes = expected_commitment.canonical_commitment.values();
+    let expected_hex: String = expected_bfes.iter()
+        .map(|bfe| format!("{:016x}", bfe.value()))
+        .collect();
+    eprintln!("[SEND] Expected commitment hex: {}", expected_hex);
 
+    let mut our_output_index: Option<usize> = None;
     for (i, output) in outputs.iter().enumerate() {
         let output_str = output.as_str().unwrap_or("");
-        eprintln!("[SEND] Output {}: {}...", i, &output_str.chars().take(40).collect::<String>());
-        // The output is an AdditionRecord which is just a Digest (commitment)
-        if output_str.contains(&expected_hex) || output_str == expected_hex {
+        // Strip 0x prefix if present
+        let output_clean = output_str.strip_prefix("0x").unwrap_or(output_str);
+        eprintln!("[SEND] Output {}: {}...", i, &output_clean.chars().take(40).collect::<String>());
+        if output_clean == expected_hex {
             our_output_index = Some(i);
+            eprintln!("[SEND] MATCH at index {}", i);
             break;
         }
     }
 
-    eprintln!("[SEND] Expected commitment: {}", expected_hex);
     eprintln!("[SEND] Our output index: {:?}", our_output_index);
 
     // For now, just report progress — the commitment matching may need adjustment
