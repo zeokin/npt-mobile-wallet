@@ -463,15 +463,25 @@ async fn send_transaction(
     );
 
     // Calculate change
+    use num_traits::{CheckedAdd, CheckedSub, Zero};
     let input_total = input_utxos[0].get_native_currency_amount();
-    let spend_total = amount_val + fee_val;
+    let spend_total = amount_val.checked_add(&fee_val)
+        .ok_or("Amount + fee overflow")?;
+
+    if input_total < spend_total {
+        return Err(format!(
+            "Insufficient balance: have {}, need {} (amount {} + fee {})",
+            input_total, spend_total, amount_val, fee_val
+        ));
+    }
 
     let mut tx_outputs = neptune_cash::state::wallet::transaction_output::TxOutputList::from(
         vec![recipient_output]
     );
 
-    if input_total > spend_total {
-        let change_amount = input_total - spend_total;
+    let change_amount_opt = input_total.checked_sub(&spend_total);
+    if let Some(change_amount) = change_amount_opt {
+        if change_amount > neptune_cash::api::export::NativeCurrencyAmount::zero() {
         let change_privacy_digest = change_address.privacy_digest();
         let change_sender_randomness = entropy.generate_sender_randomness(
             tip_block_height, change_privacy_digest
@@ -483,6 +493,7 @@ async fn send_transaction(
             true, // owned by us
         );
         tx_outputs.push(change_output);
+        }
     }
 
     eprintln!("[SEND] TransactionDetails: {} inputs, {} outputs, fee: {}",
