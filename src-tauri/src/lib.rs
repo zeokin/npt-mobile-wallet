@@ -308,16 +308,91 @@ async fn send_transaction(
     // - Generate ProofCollection (takes minutes)
     // - Submit transaction
 
-    // TODO: We need the aocl_leaf_index for each UTXO to compute AbsoluteIndexSet.
-    // This requires tracking the AOCL position when discovering UTXOs during sync.
-    // For now, report what we have.
+    // Step 4: Get the AOCL leaf index for our UTXO
+    // We need the block BEFORE our UTXO's block to know the AOCL size
+    eprintln!("[SEND] Step 4: Computing AOCL leaf index...");
+    let utxo_block_height = sync_result.utxos[0].block_height;
+
+    // Get previous block's AOCL leaf count
+    let prev_block = if utxo_block_height > 0 {
+        rpc.get_block(utxo_block_height - 1).await?
+    } else {
+        serde_json::json!(null)
+    };
+
+    // Extract AOCL num_leafs from previous block's mutator set accumulator
+    let prev_aocl_leafs: u64 = prev_block
+        .get("block")
+        .and_then(|b| b.get("kernel"))
+        .and_then(|k| k.get("body"))
+        .and_then(|b| b.get("mutatorSetAccumulator"))
+        .and_then(|msa| msa.get("aocl"))
+        .and_then(|aocl| aocl.get("leafCount").or_else(|| aocl.get("leaf_count")).or_else(|| aocl.get("numLeafs")))
+        .and_then(|n| n.as_u64())
+        .unwrap_or(0);
+
+    eprintln!("[SEND] Previous block AOCL leaf count: {}", prev_aocl_leafs);
+
+    // Get the transaction kernel for our block to find our output's position
+    let kernel_json = rpc.get_block_transaction_kernel(utxo_block_height).await?
+        .ok_or("Cannot get transaction kernel for UTXO block")?;
+
+    // Find our output position by matching the addition record
+    // The addition record = commit(Hash(utxo), sender_randomness, Hash(receiver_preimage))
+    use neptune_cash::prelude::triton_vm::prelude::Tip5;
+    use neptune_cash::protocol::proof_abstractions::mast_hash::MastHash;
+
+    let utxo_hash = Tip5::hash(&input_utxos[0]);
+    let receiver_digest = input_receiver_preimages[0].hash();
+    let expected_commitment = neptune_cash::util_types::mutator_set::commit(
+        utxo_hash,
+        input_sender_randomnesses[0],
+        receiver_digest,
+    );
+
+    // Parse outputs from kernel to find matching position
+    let outputs = kernel_json.get("outputs").and_then(|o| o.as_array())
+        .ok_or("Cannot parse outputs from kernel")?;
+
+    eprintln!("[SEND] Block has {} outputs, looking for our commitment...", outputs.len());
+
+    let mut our_output_index: Option<usize> = None;
+    let expected_hex = format!("{}", expected_commitment.canonical_commitment);
+
+    for (i, output) in outputs.iter().enumerate() {
+        let output_str = output.as_str().unwrap_or("");
+        eprintln!("[SEND] Output {}: {}...", i, &output_str.chars().take(40).collect::<String>());
+        // The output is an AdditionRecord which is just a Digest (commitment)
+        if output_str.contains(&expected_hex) || output_str == expected_hex {
+            our_output_index = Some(i);
+            break;
+        }
+    }
+
+    eprintln!("[SEND] Expected commitment: {}", expected_hex);
+    eprintln!("[SEND] Our output index: {:?}", our_output_index);
+
+    // For now, just report progress — the commitment matching may need adjustment
+    let aocl_leaf_index = match our_output_index {
+        Some(idx) => prev_aocl_leafs + idx as u64,
+        None => {
+            return Err(format!(
+                "Could not find our UTXO in block {} outputs. \
+                 Expected commitment: {}. This may be a format mismatch. \
+                 Previous AOCL leafs: {}, Block outputs: {}",
+                utxo_block_height, expected_hex, prev_aocl_leafs, outputs.len()
+            ));
+        }
+    };
+
+    eprintln!("[SEND] AOCL leaf index: {}", aocl_leaf_index);
+    eprintln!("[SEND] Step 5: TODO - restore membership proof + build tx + generate proofs");
 
     Err(format!(
-        "Send pipeline progress: {} UTXOs deserialized, tip height {}. \
-         Need to implement: membership proof fetching + ProofCollection generation. \
-         This is the final step — the crypto code exists in transaction.rs.",
-        input_utxos.len(),
-        tip_height,
+        "Progress: UTXO found at AOCL index {}. \
+         Next: restore_membership_proof → TransactionDetails → ProofCollection. \
+         Tip: {}, Block: {}, Outputs: {}",
+        aocl_leaf_index, tip_height, utxo_block_height, outputs.len()
     ))
 }
 
