@@ -72,6 +72,7 @@ impl RpcClient {
             .map_err(|e| format!("Invalid response: {}", e))?;
 
         if let Some(err) = rpc_resp.error {
+            eprintln!("[DEBUG] RPC error for method '{}': code={}, message='{}'", method, err.code, err.message);
             return Err(format!("RPC error {}: {}", err.code, err.message));
         }
 
