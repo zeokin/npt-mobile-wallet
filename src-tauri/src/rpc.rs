@@ -239,11 +239,21 @@ impl RpcClient {
         &self,
         height: u64,
     ) -> Result<Option<Value>, String> {
+        use neptune_cash::application::json_rpc::core::model::message::GetBlockTransactionKernelRequest;
+        use neptune_cash::protocol::consensus::block::block_selector::BlockSelector;
+        use neptune_cash::protocol::consensus::block::block_height::BlockHeight;
+
+        let request = GetBlockTransactionKernelRequest {
+            selector: BlockSelector::Height(BlockHeight::from(height)),
+        };
+        let params = serde_json::to_value(&request)
+            .map_err(|e| format!("Serialize request: {}", e))?;
+
+        eprintln!("[DEBUG] getBlockTransactionKernel params: {}",
+            serde_json::to_string(&params).unwrap_or_default());
+
         let result = self
-            .call(
-                "archival_getBlockTransactionKernel",
-                json!([{ "Height": height }]),
-            )
+            .call("archival_getBlockTransactionKernel", params)
             .await?;
 
         // Response: {"kernel": {...}} or {"kernel": null}
