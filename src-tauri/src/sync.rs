@@ -191,11 +191,31 @@ pub async fn scan_for_utxos(
 }
 
 /// Parse announcement message from JSON to BFieldElements.
-/// Announcements come as arrays of u64 values or nested structures.
+/// Announcements come in different formats from the RPC:
+/// - Hex string: "0x000000000000004f7a82100676eaada1..." (each 16 hex chars = 1 BFieldElement)
+/// - Array of numbers: [79, 12345, ...]
+/// - Nested: {"message": [...]} or {"0": "0x..."}
 fn parse_announcement_message(
     val: &serde_json::Value,
-) -> Option<Vec<neptune_cash::prelude::triton_vm::prelude::BFieldElement>> {
-    use neptune_cash::prelude::triton_vm::prelude::BFieldElement;
+) -> Option<Vec<BFieldElement>> {
+    // Try hex string: "0x..." where each BFieldElement is 16 hex chars (8 bytes, little-endian)
+    if let Some(hex_str) = val.as_str() {
+        let hex = hex_str.strip_prefix("0x").unwrap_or(hex_str);
+        if hex.len() >= 32 && hex.len() % 16 == 0 {
+            let bfes: Vec<BFieldElement> = hex
+                .as_bytes()
+                .chunks(16)
+                .filter_map(|chunk| {
+                    let s = std::str::from_utf8(chunk).ok()?;
+                    let bytes = u64::from_str_radix(s, 16).ok()?;
+                    Some(BFieldElement::new(bytes))
+                })
+                .collect();
+            if !bfes.is_empty() {
+                return Some(bfes);
+            }
+        }
+    }
 
     // Try direct array of numbers: [79, 12345, ...]
     if let Some(arr) = val.as_array() {
@@ -208,7 +228,7 @@ fn parse_announcement_message(
         }
     }
 
-    // Try nested: {"message": [79, 12345, ...]} or {"0": [...]}
+    // Try nested: {"message": [79, 12345, ...]} or {"0": "0x..."}
     if let Some(msg) = val.get("message").or_else(|| val.get("0")) {
         return parse_announcement_message(msg);
     }
