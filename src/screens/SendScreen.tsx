@@ -55,7 +55,7 @@ export default function SendScreen() {
 
       setStatus("Building transaction locally...");
 
-      const result = await invoke<string>("send_transaction", {
+      await invoke<string>("send_transaction", {
         pin,
         recipientAddress: address.trim(),
         amount,
