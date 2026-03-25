@@ -212,6 +212,74 @@ fn generate_local_address(
     keys::derive_receiving_address(&entropy, index, kt, net)
 }
 
+/// Send NPT: build transaction locally and submit to supporter.
+/// This is the complete send pipeline:
+/// 1. Get chain tip (mutator set accumulator)
+/// 2. Select input UTXOs
+/// 3. Build TransactionDetails with on-chain notifications
+/// 4. Generate ProofCollection (STARK proofs — may take minutes)
+/// 5. Submit via wallet_submitTransaction
+#[tauri::command]
+async fn send_transaction(
+    app: tauri::AppHandle,
+    pin: String,
+    recipient_address: String,
+    amount: String,
+    fee: String,
+    utxo_indices: Vec<usize>, // indices into the stored UTXOs to spend
+    state: State<'_, AppState>,
+) -> Result<String, String> {
+    check_session(&state)?;
+    touch_session(&state);
+    let rpc = get_rpc(&state)?;
+    let entropy = get_wallet_entropy(&app, &pin)?;
+
+    // Parse amounts
+    let amount_val = neptune_cash::api::export::NativeCurrencyAmount::coins_from_str(&amount)
+        .map_err(|e| format!("Invalid amount: {}", e))?;
+    let fee_val = neptune_cash::api::export::NativeCurrencyAmount::coins_from_str(&fee)
+        .map_err(|e| format!("Invalid fee: {}", e))?;
+
+    // Parse recipient address
+    let network = neptune_cash::application::config::network::Network::Main;
+    let recipient = neptune_cash::state::wallet::address::ReceivingAddress::from_bech32m(
+        &recipient_address,
+        network,
+    )
+    .map_err(|e| format!("Invalid address: {}", e))?;
+
+    // Get chain tip for mutator set accumulator
+    let tip_json = rpc.get_tip().await?;
+
+    // Get current block height
+    let tip_height = tip_json
+        .get("block")
+        .and_then(|b| b.get("kernel"))
+        .and_then(|k| k.get("header"))
+        .and_then(|h| h.get("height"))
+        .and_then(|h| h.as_u64())
+        .ok_or("Cannot parse tip height")?;
+
+    // For now, return info about what would be built
+    // Full pipeline requires: deserializing UTXOs, computing AbsoluteIndexSets,
+    // calling wallet_restoreMembershipProof, building TransactionDetails,
+    // generating ProofCollection, and submitting.
+    //
+    // This is blocked until we have real UTXOs from Alan's test send.
+    // The transaction.rs module has the ProofCollection generation code ready.
+
+    Err(format!(
+        "Send pipeline ready but needs real UTXOs. \
+         Recipient: {}...{}, Amount: {}, Fee: {}, Tip height: {}. \
+         Waiting for test NPT from Alan to complete end-to-end test.",
+        &recipient_address[..10],
+        &recipient_address[recipient_address.len()-6..],
+        amount,
+        fee,
+        tip_height,
+    ))
+}
+
 /// Scan the blockchain for UTXOs belonging to this wallet.
 /// Uses Thorkil's privacy-preserving approach:
 /// AnnouncementFlag → blockHeightsByFlags → decrypt locally.
@@ -351,8 +419,9 @@ pub fn run() {
             delete_wallet,
             // Local key derivation
             generate_local_address,
-            // UTXO scanning
+            // UTXO scanning + sending
             sync_wallet,
+            send_transaction,
             // Supporter
             connect_node,
             disconnect_node,
