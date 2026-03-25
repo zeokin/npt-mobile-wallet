@@ -248,10 +248,48 @@ async fn send_transaction(
     )
     .map_err(|e| format!("Invalid address: {}", e))?;
 
-    // Get chain tip for mutator set accumulator
-    let tip_json = rpc.get_tip().await?;
+    // Step 1: Re-scan to get fresh UTXOs with spending data
+    eprintln!("[SEND] Step 1: Scanning for UTXOs...");
+    let sync_result = sync::scan_for_utxos(&rpc, &entropy, 5, 1).await?;
+    if sync_result.utxos.is_empty() {
+        return Err("No UTXOs found. Sync your wallet first.".to_string());
+    }
+    eprintln!("[SEND] Found {} UTXOs", sync_result.utxos.len());
 
-    // Get current block height
+    // Step 2: Deserialize the first UTXO's data for spending
+    // For now, use all available UTXOs as inputs
+    let mut input_utxos = Vec::new();
+    let mut input_sender_randomnesses = Vec::new();
+    let mut input_receiver_preimages = Vec::new();
+
+    for utxo_data in &sync_result.utxos {
+        let utxo_bytes = hex::decode(&utxo_data.utxo_hex)
+            .map_err(|e| format!("Decode UTXO hex: {}", e))?;
+        let utxo: neptune_cash::protocol::consensus::transaction::utxo::Utxo =
+            bincode::deserialize(&utxo_bytes)
+                .map_err(|e| format!("Deserialize UTXO: {}", e))?;
+
+        let sr_bytes = hex::decode(&utxo_data.sender_randomness_hex)
+            .map_err(|e| format!("Decode sender_randomness: {}", e))?;
+        let sender_randomness: neptune_cash::prelude::triton_vm::prelude::Digest =
+            bincode::deserialize(&sr_bytes)
+                .map_err(|e| format!("Deserialize sender_randomness: {}", e))?;
+
+        let rp_bytes = hex::decode(&utxo_data.receiver_preimage_hex)
+            .map_err(|e| format!("Decode receiver_preimage: {}", e))?;
+        let receiver_preimage: neptune_cash::prelude::triton_vm::prelude::Digest =
+            bincode::deserialize(&rp_bytes)
+                .map_err(|e| format!("Deserialize receiver_preimage: {}", e))?;
+
+        input_utxos.push(utxo);
+        input_sender_randomnesses.push(sender_randomness);
+        input_receiver_preimages.push(receiver_preimage);
+    }
+    eprintln!("[SEND] Step 2: Deserialized {} input UTXOs", input_utxos.len());
+
+    // Step 3: Get chain tip for mutator set accumulator
+    eprintln!("[SEND] Step 3: Getting chain tip...");
+    let tip_json = rpc.get_tip().await?;
     let tip_height = tip_json
         .get("block")
         .and_then(|b| b.get("kernel"))
@@ -259,23 +297,26 @@ async fn send_transaction(
         .and_then(|h| h.get("height"))
         .and_then(|h| h.as_u64())
         .ok_or("Cannot parse tip height")?;
+    eprintln!("[SEND] Chain tip at height {}", tip_height);
 
-    // For now, return info about what would be built
-    // Full pipeline requires: deserializing UTXOs, computing AbsoluteIndexSets,
-    // calling wallet_restoreMembershipProof, building TransactionDetails,
-    // generating ProofCollection, and submitting.
-    //
-    // This is blocked until we have real UTXOs from Alan's test send.
-    // The transaction.rs module has the ProofCollection generation code ready.
+    // Step 4: Build TransactionDetails
+    // This requires membership proofs, which we need to get from the supporter.
+    // For now, return progress info — the full pipeline needs:
+    // - Compute AbsoluteIndexSet for each input UTXO (needs aocl_leaf_index)
+    // - Call wallet_restoreMembershipProof
+    // - Build TransactionDetails::new_without_coinbase()
+    // - Generate ProofCollection (takes minutes)
+    // - Submit transaction
+
+    // TODO: We need the aocl_leaf_index for each UTXO to compute AbsoluteIndexSet.
+    // This requires tracking the AOCL position when discovering UTXOs during sync.
+    // For now, report what we have.
 
     Err(format!(
-        "Send pipeline ready but needs real UTXOs. \
-         Recipient: {}...{}, Amount: {}, Fee: {}, Tip height: {}. \
-         Waiting for test NPT from Alan to complete end-to-end test.",
-        &recipient_address[..10],
-        &recipient_address[recipient_address.len()-6..],
-        amount,
-        fee,
+        "Send pipeline progress: {} UTXOs deserialized, tip height {}. \
+         Need to implement: membership proof fetching + ProofCollection generation. \
+         This is the final step — the crypto code exists in transaction.rs.",
+        input_utxos.len(),
         tip_height,
     ))
 }
