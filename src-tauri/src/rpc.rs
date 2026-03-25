@@ -194,11 +194,22 @@ impl RpcClient {
         let flags_json = serde_json::to_value(flags)
             .map_err(|e| format!("Serialize flags: {}", e))?;
 
-        // Debug: log what we're sending
-        eprintln!("[DEBUG] blockHeightsByFlags params: {}",
+        eprintln!("[DEBUG] blockHeightsByFlags trying tuple params: {}",
             serde_json::to_string(&json!([flags_json])).unwrap_or_default());
 
+        // Try tuple-wrapped format first: [[{flag, receiver_id}, ...]]
         let result = match self.call("utxoindex_blockHeightsByFlags", json!([flags_json])).await {
+            Ok(r) => Ok(r),
+            Err(e) if e.contains("-32602") || e.contains("Invalid params") => {
+                // Try flat format: [{flag, receiver_id}, ...]
+                eprintln!("[DEBUG] Tuple params failed, trying flat: {}",
+                    serde_json::to_string(&flags_json).unwrap_or_default());
+                self.call("utxoindex_blockHeightsByFlags", flags_json.clone()).await
+            }
+            Err(e) => Err(e),
+        };
+
+        let result = match result {
             Ok(r) => r,
             Err(e) => {
                 eprintln!("[DEBUG] blockHeightsByFlags error: {}", e);
