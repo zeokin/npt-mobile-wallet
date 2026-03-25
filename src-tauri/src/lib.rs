@@ -356,13 +356,32 @@ async fn send_transaction(
 
     eprintln!("[SEND] Block has {} outputs, looking for our commitment...", outputs.len());
 
-    // Convert our expected commitment to hex format for comparison
-    // Digest values are 5 BFieldElements, each serialized as 16 hex chars
-    let expected_bfes = expected_commitment.canonical_commitment.values();
-    let expected_hex: String = expected_bfes.iter()
+    // Debug: show the raw commitment values
+    let expected_digest = expected_commitment.canonical_commitment;
+    let expected_bfes = expected_digest.values();
+    eprintln!("[SEND] Expected commitment BFEs: {:?}",
+        expected_bfes.iter().map(|b| b.value()).collect::<Vec<_>>());
+
+    // Try multiple hex formats to match the RPC output format
+    // Format 1: big-endian u64 per BFE
+    let expected_hex_be: String = expected_bfes.iter()
         .map(|bfe| format!("{:016x}", bfe.value()))
         .collect();
-    eprintln!("[SEND] Expected commitment hex: {}", expected_hex);
+    // Format 2: little-endian bytes
+    let expected_hex_le: String = expected_bfes.iter()
+        .flat_map(|bfe| bfe.value().to_le_bytes())
+        .map(|b| format!("{:02x}", b))
+        .collect::<String>();
+    // Format 3: raw bytes via bincode
+    let expected_hex_bincode = hex::encode(
+        bincode::serialize(&expected_digest).unwrap_or_default()
+    );
+
+    eprintln!("[SEND] Expected hex (BE): {}", expected_hex_be);
+    eprintln!("[SEND] Expected hex (LE): {}", expected_hex_le);
+    eprintln!("[SEND] Expected hex (bincode): {}", expected_hex_bincode);
+
+    let expected_hex = expected_hex_be.clone(); // we'll try matching all formats
 
     let mut our_output_index: Option<usize> = None;
     for (i, output) in outputs.iter().enumerate() {
@@ -370,9 +389,11 @@ async fn send_transaction(
         // Strip 0x prefix if present
         let output_clean = output_str.strip_prefix("0x").unwrap_or(output_str);
         eprintln!("[SEND] Output {}: {}...", i, &output_clean.chars().take(40).collect::<String>());
-        if output_clean == expected_hex {
+        if output_clean == expected_hex_be
+            || output_clean == expected_hex_le
+            || output_clean == expected_hex_bincode {
             our_output_index = Some(i);
-            eprintln!("[SEND] MATCH at index {}", i);
+            eprintln!("[SEND] MATCH at index {} !", i);
             break;
         }
     }
