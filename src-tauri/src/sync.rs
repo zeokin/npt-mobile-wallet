@@ -100,22 +100,34 @@ pub async fn scan_for_utxos(
         };
 
         // Extract announcements array from the kernel JSON
+        eprintln!("[DEBUG] kernel JSON keys: {:?}",
+            kernel_json.as_object().map(|o| o.keys().collect::<Vec<_>>()));
         let announcements = kernel_json
             .get("announcements")
             .and_then(|a| a.as_array())
             .cloned()
             .unwrap_or_default();
+        eprintln!("[DEBUG] Found {} announcements in block {}", announcements.len(), height);
 
         // Step 4: Try decrypting each announcement with each spending key
         for announcement_val in &announcements {
             // Parse announcement message (array of u64 field elements)
             let msg = match parse_announcement_message(announcement_val) {
-                Some(m) => m,
-                None => continue,
+                Some(m) => {
+                    eprintln!("[DEBUG] Parsed announcement: {} BFieldElements, first two: {:?}",
+                        m.len(), m.iter().take(2).map(|b| b.value()).collect::<Vec<_>>());
+                    m
+                }
+                None => {
+                    eprintln!("[DEBUG] Failed to parse announcement: {}",
+                        serde_json::to_string(announcement_val).unwrap_or_default().chars().take(200).collect::<String>());
+                    continue;
+                }
             };
 
             if msg.len() < 3 {
-                continue; // Need at least flag + receiver_id + ciphertext
+                eprintln!("[DEBUG] Announcement too short: {} elements", msg.len());
+                continue;
             }
 
             let ann_receiver_id = msg[1];
