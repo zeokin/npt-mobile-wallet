@@ -193,6 +193,11 @@ impl RpcClient {
     ) -> Result<Vec<u64>, String> {
         let flags_json = serde_json::to_value(flags)
             .map_err(|e| format!("Serialize flags: {}", e))?;
+
+        // Debug: log what we're sending
+        eprintln!("[DEBUG] blockHeightsByFlags params: {}",
+            serde_json::to_string_pretty(&json!([flags_json])).unwrap_or_default());
+
         let result = self.call("utxoindex_blockHeightsByFlags", json!([flags_json])).await?;
 
         // Response: {"block_heights": [1, 2, 3]} or {"blockHeights": [...]}
