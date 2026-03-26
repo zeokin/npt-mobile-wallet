@@ -317,19 +317,23 @@ async fn send_transaction(
     use neptune_cash::protocol::consensus::block::block_kernel::BlockKernel;
     use neptune_cash::prelude::twenty_first::util_types::mmr::mmr_trait::Mmr;
 
-    // Helper: parse RpcWalletBlock and get MSA + additions
-    fn parse_wallet_block(json: &serde_json::Value) -> Result<(BlockKernel, neptune_cash::prelude::triton_vm::prelude::Digest), String> {
-        let block_json = json.get("block").cloned().unwrap_or(json.clone());
-        let rpc_block: RpcWalletBlock = serde_json::from_value(block_json)
-            .map_err(|e| format!("Deserialize wallet block: {}", e))?;
-        let hash = rpc_block.hash();
-        let kernel: BlockKernel = rpc_block.kernel.into();
-        Ok((kernel, hash))
+    // Helper: parse wallet blocks from RPC response
+    fn parse_wallet_blocks(json: &serde_json::Value) -> Result<Vec<(BlockKernel, neptune_cash::prelude::triton_vm::prelude::Digest)>, String> {
+        let blocks_json = json.get("blocks").cloned().unwrap_or(json.clone());
+        let rpc_blocks: Vec<RpcWalletBlock> = serde_json::from_value(blocks_json)
+            .map_err(|e| format!("Deserialize wallet blocks: {}", e))?;
+        Ok(rpc_blocks.into_iter().map(|b| {
+            let hash = b.hash();
+            let kernel: BlockKernel = b.kernel.into();
+            (kernel, hash)
+        }).collect())
     }
 
-    // Get previous block
-    let prev_block_json = rpc.get_block(utxo_block_height - 1).await?;
-    let (prev_kernel, prev_hash) = parse_wallet_block(&prev_block_json)?;
+    // Get previous block via wallet_getBlocks (returns RpcWalletBlock with proof_leaf)
+    let prev_blocks_json = rpc.get_wallet_blocks(utxo_block_height - 1, utxo_block_height - 1).await?;
+    let prev_blocks = parse_wallet_blocks(&prev_blocks_json)?;
+    let (prev_kernel, prev_hash) = prev_blocks.into_iter().next()
+        .ok_or("No previous block returned")?;
     let prev_guesser_fees = prev_kernel.guesser_fee_addition_records(prev_hash)
         .map_err(|e| format!("Get guesser fees from prev block: {}", e))?;
     let prev_msa = prev_kernel.body.mutator_set_accumulator_after(prev_guesser_fees);
@@ -341,8 +345,10 @@ async fn send_transaction(
     use neptune_cash::prelude::triton_vm::prelude::Tip5;
     use neptune_cash::protocol::proof_abstractions::mast_hash::MastHash;
 
-    let our_block_json = rpc.get_block(utxo_block_height).await?;
-    let (our_kernel, our_hash) = parse_wallet_block(&our_block_json)?;
+    let our_blocks_json = rpc.get_wallet_blocks(utxo_block_height, utxo_block_height).await?;
+    let our_blocks = parse_wallet_blocks(&our_blocks_json)?;
+    let (our_kernel, our_hash) = our_blocks.into_iter().next()
+        .ok_or("No block returned for UTXO height")?;
 
     // Get ALL addition records (tx outputs + guesser fees) — same order as AOCL
     let all_additions = our_kernel.all_addition_records(our_hash)

@@ -169,19 +169,19 @@ impl RpcClient {
         self.call("chain_tip", json!([])).await
     }
 
-    /// Get a full block by height.
-    /// Method: archival_getBlock
-    pub async fn get_block(&self, height: u64) -> Result<Value, String> {
-        use neptune_cash::application::json_rpc::core::model::message::GetBlockRequest;
-        use neptune_cash::protocol::consensus::block::block_selector::BlockSelector;
+    /// Get wallet-optimized blocks by height range.
+    /// Method: wallet_getBlocks — returns RpcWalletBlock (lighter than full Block)
+    pub async fn get_wallet_blocks(&self, from_height: u64, to_height: u64) -> Result<Value, String> {
+        use neptune_cash::application::json_rpc::core::model::message::GetBlocksRequest;
         use neptune_cash::protocol::consensus::block::block_height::BlockHeight;
 
-        let request = GetBlockRequest {
-            selector: BlockSelector::Height(BlockHeight::from(height)),
+        let request = GetBlocksRequest {
+            from_height: BlockHeight::from(from_height),
+            to_height: BlockHeight::from(to_height),
         };
         let params = serde_json::to_value(&request)
             .map_err(|e| format!("Serialize request: {}", e))?;
-        self.call("archival_getBlock", params).await
+        self.call("wallet_getBlocks", params).await
     }
 
     /// Restore membership proofs for spending UTXOs.
