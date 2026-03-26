@@ -22,6 +22,9 @@ const PIN_COOLDOWN_SECS: u64 = 30;
 struct AppState {
     rpc: Mutex<Option<RpcClient>>,
     wallet_unlocked: Mutex<bool>,
+    /// PIN cached after unlock — used for sync/send/address without re-entering.
+    /// Cleared on lock.
+    cached_pin: Mutex<Option<String>>,
     /// Tracks when the last user activity occurred (for session timeout).
     last_activity: Mutex<Option<Instant>>,
     /// Tracks consecutive failed PIN attempts.
@@ -120,6 +123,7 @@ fn unlock_wallet(
             }
 
             *state.wallet_unlocked.lock().unwrap() = true;
+            *state.cached_pin.lock().unwrap() = Some(pin);
             touch_session(&state);
             Ok(())
         }
@@ -143,6 +147,7 @@ fn unlock_wallet(
 #[tauri::command]
 fn lock_wallet(state: State<'_, AppState>) -> Result<(), String> {
     *state.wallet_unlocked.lock().unwrap() = false;
+    *state.cached_pin.lock().unwrap() = None;
     *state.last_activity.lock().unwrap() = None;
     Ok(())
 }
@@ -199,14 +204,18 @@ fn get_wallet_entropy(
 #[tauri::command]
 fn generate_local_address(
     app: tauri::AppHandle,
-    pin: String,
+    pin: Option<String>,
     index: u64,
     key_type: Option<String>,
     network: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<String, String> {
     check_session(&state)?;
-    let entropy = get_wallet_entropy(&app, &pin)?;
+    let actual_pin = pin.unwrap_or_else(|| get_cached_pin(&state).unwrap_or_default());
+    if actual_pin.is_empty() {
+        return Err("PIN required".to_string());
+    }
+    let entropy = get_wallet_entropy(&app, &actual_pin)?;
     let kt = key_type.as_deref().unwrap_or("generation");
     let net = network.as_deref().unwrap_or("mainnet");
     keys::derive_receiving_address(&entropy, index, kt, net)
@@ -222,7 +231,7 @@ fn generate_local_address(
 #[tauri::command]
 async fn send_transaction(
     app: tauri::AppHandle,
-    pin: String,
+    pin: Option<String>,
     recipient_address: String,
     amount: String,
     fee: String,
@@ -232,7 +241,11 @@ async fn send_transaction(
     check_session(&state)?;
     touch_session(&state);
     let rpc = get_rpc(&state)?;
-    let entropy = get_wallet_entropy(&app, &pin)?;
+    let actual_pin = pin.unwrap_or_else(|| get_cached_pin(&state).unwrap_or_default());
+    if actual_pin.is_empty() {
+        return Err("PIN required".to_string());
+    }
+    let entropy = get_wallet_entropy(&app, &actual_pin)?;
 
     // Parse amounts
     let amount_val = neptune_cash::api::export::NativeCurrencyAmount::coins_from_str(&amount)
@@ -584,14 +597,18 @@ async fn send_transaction(
 #[tauri::command]
 async fn sync_wallet(
     app: tauri::AppHandle,
-    pin: String,
+    pin: Option<String>,
     num_keys: Option<u64>,
     state: State<'_, AppState>,
 ) -> Result<sync::SyncResult, String> {
     check_session(&state)?;
     touch_session(&state);
     let rpc = get_rpc(&state)?;
-    let entropy = get_wallet_entropy(&app, &pin)?;
+    let actual_pin = pin.unwrap_or_else(|| get_cached_pin(&state).unwrap_or_default());
+    if actual_pin.is_empty() {
+        return Err("PIN required".to_string());
+    }
+    let entropy = get_wallet_entropy(&app, &actual_pin)?;
     let key_count = num_keys.unwrap_or(5); // scan first 5 addresses by default
     sync::scan_for_utxos(&rpc, &entropy, key_count, 1).await
 }
@@ -614,6 +631,11 @@ async fn connect_node(
 async fn disconnect_node(state: State<'_, AppState>) -> Result<(), String> {
     *state.rpc.lock().unwrap() = None;
     Ok(())
+}
+
+fn get_cached_pin(state: &State<'_, AppState>) -> Result<String, String> {
+    state.cached_pin.lock().unwrap().clone()
+        .ok_or_else(|| "Session expired — please unlock again".to_string())
 }
 
 fn get_rpc(state: &State<'_, AppState>) -> Result<RpcClient, String> {
@@ -700,6 +722,7 @@ pub fn run() {
         .manage(AppState {
             rpc: Mutex::new(None),
             wallet_unlocked: Mutex::new(false),
+            cached_pin: Mutex::new(None),
             last_activity: Mutex::new(None),
             failed_pin_attempts: Mutex::new(0),
             lockout_until: Mutex::new(None),

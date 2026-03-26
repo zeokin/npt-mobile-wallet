@@ -14,12 +14,14 @@ export const isSessionValid = () => invoke<boolean>("is_session_valid");
 export const touchActivity = () => invoke<void>("touch_activity");
 
 // Local key derivation (on-device, no network needed)
-export const generateLocalAddress = (pin: string, index: number, keyType?: string, network?: string) =>
+// PIN is optional — uses cached PIN from unlock if null
+export const generateLocalAddress = (pin: string | null, index: number, keyType?: string, network?: string) =>
   invoke<string>("generate_local_address", {
-    pin, index, keyType: keyType || null, network: network || null
+    pin: pin || null, index, keyType: keyType || null, network: network || null
   });
 
 // UTXO scanning (uses supporter + local decryption)
+// PIN is optional — uses cached PIN from unlock if null
 export interface SyncResult {
   balance: string;
   utxo_count: number;
@@ -37,8 +39,8 @@ export interface DiscoveredUtxo {
   receiver_preimage_hex: string;
   aocl_leaf_index: number | null;
 }
-export const syncWallet = (pin: string, numKeys?: number) =>
-  invoke<SyncResult>("sync_wallet", { pin, numKeys: numKeys || null });
+export const syncWallet = (pin: string | null, numKeys?: number) =>
+  invoke<SyncResult>("sync_wallet", { pin: pin || null, numKeys: numKeys || null });
 
 // Supporter connection
 export interface ConnectionInfo { network: string; block_height: number; }

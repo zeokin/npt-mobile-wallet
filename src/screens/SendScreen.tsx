@@ -13,10 +13,8 @@ export default function SendScreen() {
   const [address, setAddress] = useState("");
   const [amount, setAmount] = useState("");
   const [fee, setFee] = useState("0.001");
-  const [pin, setPin] = useState("");
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState("");
-  const [step, setStep] = useState<"form" | "pin">("form");
 
   const unspentUtxos = utxos.filter((u) => !u.likely_spent);
 
@@ -40,35 +38,20 @@ export default function SendScreen() {
     unspentUtxos.length > 0 &&
     !loading;
 
-  const handleSend = () => {
+  const handleSend = async () => {
     if (!canSend) return;
-    setStep("pin");
-  };
-
-  const doSend = async () => {
-    if (!pin) {
-      toast.error("Enter your PIN");
-      return;
-    }
-    setStep("form");
     setLoading(true);
-    setStatus("Validating address...");
+    setStatus("Building transaction locally...");
 
     try {
-      // Use all unspent UTXOs as inputs
-      const utxoIndices = unspentUtxos.map((_, i) => i);
-
-      setStatus("Building transaction locally...");
-
       await invoke<string>("send_transaction", {
-        pin,
+        pin: null,
         recipientAddress: address.trim(),
         amount,
         fee,
-        utxoIndices,
+        utxoIndices: unspentUtxos.map((_, i) => i),
       });
 
-      // Store outgoing transaction in local history
       addOutgoingTx({
         txid: "local",
         recipient: address.trim(),
@@ -83,11 +66,9 @@ export default function SendScreen() {
     } catch (e) {
       const msg = String(e);
       setStatus("");
-      // Show the detailed error (includes pipeline status)
       toast.error(msg, { duration: 10000 });
     } finally {
       setLoading(false);
-      setPin("");
     }
   };
 
@@ -97,8 +78,6 @@ export default function SendScreen() {
         <h1 className="text-xl font-bold">Send NPT</h1>
       </div>
       <div className="flex-1 overflow-y-auto px-4 space-y-4">
-        {step === "form" && (
-          <>
             <div>
               <label className="block text-sm text-[var(--npt-muted)] mb-1">
                 Recipient Address
@@ -177,47 +156,6 @@ export default function SendScreen() {
             >
               {loading ? "Processing..." : "Send"}
             </button>
-          </>
-        )}
-
-        {step === "pin" && (
-          <div className="space-y-4 pt-8">
-            <div className="text-center">
-              <h2 className="text-lg font-semibold">Confirm with PIN</h2>
-              <p className="text-xs text-[var(--npt-muted)]">
-                Sending {amount} NPT + {fee} fee
-              </p>
-            </div>
-            <input
-              type="password"
-              inputMode="numeric"
-              placeholder="PIN"
-              value={pin}
-              autoFocus
-              onChange={(e) => setPin(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && doSend()}
-              className="w-full px-3 py-3 rounded-lg bg-[var(--npt-card)] border border-[var(--npt-border)] text-[var(--npt-text)] text-center text-2xl tracking-[0.5em] focus:outline-none focus:border-[var(--npt-blue)]"
-            />
-            <div className="flex gap-3">
-              <button
-                onClick={() => {
-                  setStep("form");
-                  setPin("");
-                }}
-                className="flex-1 py-3 rounded-lg border border-[var(--npt-border)] text-[var(--npt-muted)] font-semibold"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={doSend}
-                disabled={loading}
-                className="flex-1 py-3 rounded-lg bg-[var(--npt-blue)] text-white font-semibold disabled:opacity-50"
-              >
-                {loading ? "Building..." : "Confirm Send"}
-              </button>
-            </div>
-          </div>
-        )}
       </div>
       <NavBar />
     </div>
