@@ -309,43 +309,43 @@ async fn send_transaction(
     // - Submit transaction
 
     // Step 4: Get the AOCL leaf index for our UTXO
-    // Use TYPED deserialization — no JSON field name guessing
+    // Use neptune-wallet-app's approach: RpcWalletBlock → WalletBlock pattern
     eprintln!("[SEND] Step 4: Computing AOCL leaf index...");
     let utxo_block_height = sync_result.utxos[0].block_height;
 
-    // Get previous block using typed deserialization
-    use neptune_cash::application::json_rpc::core::model::block::RpcBlock;
-    use neptune_cash::protocol::consensus::block::Block;
+    use neptune_cash::application::json_rpc::core::model::wallet::block::RpcWalletBlock;
+    use neptune_cash::protocol::consensus::block::block_kernel::BlockKernel;
     use neptune_cash::prelude::twenty_first::util_types::mmr::mmr_trait::Mmr;
 
+    // Helper: parse RpcWalletBlock and get MSA + additions
+    fn parse_wallet_block(json: &serde_json::Value) -> Result<(BlockKernel, neptune_cash::prelude::triton_vm::prelude::Digest), String> {
+        let block_json = json.get("block").cloned().unwrap_or(json.clone());
+        let rpc_block: RpcWalletBlock = serde_json::from_value(block_json)
+            .map_err(|e| format!("Deserialize wallet block: {}", e))?;
+        let hash = rpc_block.hash();
+        let kernel: BlockKernel = rpc_block.kernel.into();
+        Ok((kernel, hash))
+    }
+
+    // Get previous block
     let prev_block_json = rpc.get_block(utxo_block_height - 1).await?;
-    let prev_block_response_json = prev_block_json.get("block")
-        .cloned()
-        .unwrap_or(prev_block_json.clone());
-    let prev_rpc_block: RpcBlock = serde_json::from_value(prev_block_response_json)
-        .map_err(|e| format!("Deserialize previous block: {}", e))?;
-    let prev_block: Block = prev_rpc_block.into();
-    let prev_msa = prev_block.mutator_set_accumulator_after()
-        .map_err(|e| format!("Get MSA from previous block: {}", e))?;
+    let (prev_kernel, prev_hash) = parse_wallet_block(&prev_block_json)?;
+    let prev_guesser_fees = prev_kernel.guesser_fee_addition_records(prev_hash)
+        .map_err(|e| format!("Get guesser fees from prev block: {}", e))?;
+    let prev_msa = prev_kernel.body.mutator_set_accumulator_after(prev_guesser_fees);
     let prev_aocl_leafs = prev_msa.aocl.num_leafs();
 
-    eprintln!("[SEND] Previous block AOCL leaf count (typed): {}", prev_aocl_leafs);
+    eprintln!("[SEND] Previous block AOCL leaf count (with guesser fees): {}", prev_aocl_leafs);
 
     // Get the FULL block (typed) to find our output's position
     use neptune_cash::prelude::triton_vm::prelude::Tip5;
     use neptune_cash::protocol::proof_abstractions::mast_hash::MastHash;
 
     let our_block_json = rpc.get_block(utxo_block_height).await?;
-    let our_block_response_json = our_block_json.get("block")
-        .cloned()
-        .unwrap_or(our_block_json.clone());
-    let our_rpc_block: RpcBlock = serde_json::from_value(our_block_response_json)
-        .map_err(|e| format!("Deserialize our block: {}", e))?;
-    let our_block: Block = our_rpc_block.into();
+    let (our_kernel, our_hash) = parse_wallet_block(&our_block_json)?;
 
     // Get ALL addition records (tx outputs + guesser fees) — same order as AOCL
-    let block_hash = our_block.hash();
-    let all_additions = our_block.kernel.all_addition_records(block_hash)
+    let all_additions = our_kernel.all_addition_records(our_hash)
         .map_err(|e| format!("Get addition records: {}", e))?;
 
     // Compute our expected commitment
