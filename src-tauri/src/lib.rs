@@ -341,7 +341,11 @@ async fn send_transaction(
     // Step 4: Get the AOCL leaf index for our UTXO
     // Use neptune-wallet-app's approach: RpcWalletBlock → WalletBlock pattern
     eprintln!("[SEND] Step 4: Computing AOCL leaf index...");
-    let utxo_block_height = sync_result.utxos[0].block_height;
+    // Use the first UNSPENT UTXO, not the first UTXO overall
+    let first_unspent = sync_result.utxos.iter()
+        .find(|u| !u.likely_spent)
+        .ok_or("No unspent UTXOs found after filtering")?;
+    let utxo_block_height = first_unspent.block_height;
 
     use neptune_cash::application::json_rpc::core::model::wallet::block::RpcWalletBlock;
     use neptune_cash::protocol::consensus::block::block_kernel::BlockKernel;
@@ -480,9 +484,15 @@ async fn send_transaction(
 
     // Step 7: Create UnlockedUtxo
     eprintln!("[SEND] Step 7: Creating UnlockedUtxo...");
-    let spending_key = neptune_cash::state::wallet::address::SpendingKey::Generation(
-        entropy.nth_generation_spending_key(sync_result.utxos[0].key_index)
-    );
+    let spending_key = if first_unspent.key_type == "generation" {
+        neptune_cash::state::wallet::address::SpendingKey::Generation(
+            entropy.nth_generation_spending_key(first_unspent.key_index)
+        )
+    } else {
+        neptune_cash::state::wallet::address::SpendingKey::Symmetric(
+            entropy.nth_symmetric_key(first_unspent.key_index)
+        )
+    };
     let lock_script_and_witness = spending_key.lock_script_and_witness();
     let unlocked = UnlockedUtxo::unlock(
         input_utxos[0].clone(),
