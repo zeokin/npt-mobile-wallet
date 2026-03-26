@@ -12,7 +12,10 @@ const DEFAULT_SUPPORTER = "https://wallet.neptunefundamentals.org";
 export default function WalletScreen() {
   const navigate = useNavigate();
   const { network, blockHeight, connected, setConnected } = useSettingsStore();
-  const { balance, utxos, outgoingTxs, setBalance, setUtxos } = useWalletStore();
+  const { balance, utxos, outgoingTxs, setBalance, setUtxos, clearPendingWithoutRecords } = useWalletStore();
+
+  // Clean up old pending transactions that have no addition records
+  useEffect(() => { clearPendingWithoutRecords(); }, []);
   const [syncing, setSyncing] = useState(false);
   const [syncInfo, setSyncInfo] = useState<string | null>(null);
   const [myAddress, setMyAddress] = useState("");
@@ -56,12 +59,7 @@ export default function WalletScreen() {
     return () => clearInterval(interval);
   }, [connected]);
 
-  // Auto-sync on first load if balance is 0
-  useEffect(() => {
-    if (connected && balance === "0" && !syncing) {
-      doSync();
-    }
-  }, [connected]);
+  // No auto-sync — user clicks Sync button manually
 
   const doSync = async () => {
     if (!connected) {

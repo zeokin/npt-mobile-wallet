@@ -46,6 +46,12 @@ export const useWalletStore = create<WalletState>()(
       setLoading: (loading) => set({ loading }),
       setError: (error) => set({ error }),
       setLastSyncHeight: (height) => set({ lastSyncHeight: height }),
+      clearPendingWithoutRecords: () =>
+        set((state) => ({
+          outgoingTxs: state.outgoingTxs.filter(
+            (tx) => tx.addition_record_hexes?.length > 0 || tx.status === "confirmed"
+          ),
+        })),
       reset: () =>
         set({
           balance: "0",
