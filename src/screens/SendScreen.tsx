@@ -20,23 +20,28 @@ export default function SendScreen() {
 
   const unspentUtxos = utxos.filter((u) => !u.likely_spent);
 
+  // Calculate available balance
+  const availableBalance = unspentUtxos.reduce((sum, u) => {
+    const val = parseFloat(u.amount) || 0;
+    return sum + val;
+  }, 0);
+
+  const amountNum = parseFloat(amount) || 0;
+  const feeNum = parseFloat(fee) || 0;
+  const totalNeeded = amountNum + feeNum;
+
+  // Send button should only be active when all conditions are met
+  const canSend =
+    address.trim().length > 0 &&
+    amountNum > 0 &&
+    feeNum >= 0 &&
+    totalNeeded <= availableBalance &&
+    connected &&
+    unspentUtxos.length > 0 &&
+    !loading;
+
   const handleSend = () => {
-    if (!address.trim()) {
-      toast.error("Enter recipient address");
-      return;
-    }
-    if (!amount.trim() || parseFloat(amount) <= 0) {
-      toast.error("Enter valid amount");
-      return;
-    }
-    if (!connected) {
-      toast.error("Connect to a supporter first");
-      return;
-    }
-    if (unspentUtxos.length === 0) {
-      toast.error("No UTXOs available. Sync your wallet first.");
-      return;
-    }
+    if (!canSend) return;
     setStep("pin");
   };
 
@@ -132,14 +137,23 @@ export default function SendScreen() {
               />
             </div>
 
-            {/* UTXO info */}
-            <div className="p-3 rounded-lg bg-[var(--npt-card)] border border-[var(--npt-border)]">
-              <p className="text-xs text-[var(--npt-muted)]">
-                Available: {unspentUtxos.length} UTXOs
-                {unspentUtxos.length > 0 && (
-                  <> ({unspentUtxos.map((u) => u.amount).join(" + ")})</>
-                )}
-              </p>
+            {/* Balance info */}
+            <div className="p-3 rounded-lg bg-[var(--npt-card)] border border-[var(--npt-border)] space-y-1">
+              <div className="flex justify-between text-xs">
+                <span className="text-[var(--npt-muted)]">Available</span>
+                <span>{availableBalance.toFixed(2)} NPT</span>
+              </div>
+              {amountNum > 0 && (
+                <div className="flex justify-between text-xs">
+                  <span className="text-[var(--npt-muted)]">Total (amount + fee)</span>
+                  <span className={totalNeeded > availableBalance ? "text-red-400" : ""}>
+                    {totalNeeded.toFixed(2)} NPT
+                  </span>
+                </div>
+              )}
+              {totalNeeded > availableBalance && amountNum > 0 && (
+                <p className="text-xs text-red-400">Insufficient balance</p>
+              )}
             </div>
 
             <div className="p-3 rounded-lg bg-yellow-500/10 border border-yellow-500/30">
@@ -158,8 +172,8 @@ export default function SendScreen() {
 
             <button
               onClick={handleSend}
-              disabled={loading}
-              className="w-full py-3 rounded-lg bg-[var(--npt-blue)] text-white font-semibold disabled:opacity-50 active:opacity-80"
+              disabled={!canSend}
+              className="w-full py-3 rounded-lg bg-[var(--npt-blue)] text-white font-semibold disabled:opacity-30 active:opacity-80 transition-opacity"
             >
               {loading ? "Processing..." : "Send"}
             </button>

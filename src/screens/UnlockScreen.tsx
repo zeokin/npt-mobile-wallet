@@ -1,10 +1,14 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
-import { unlockWallet } from "../api/rpc";
+import { unlockWallet, deleteWallet, connectNode } from "../api/rpc";
+import { useSettingsStore } from "../store/settings-store";
+
+const DEFAULT_SUPPORTER = "https://wallet.neptunefundamentals.org";
 
 export default function UnlockScreen() {
   const navigate = useNavigate();
+  const { setConnected } = useSettingsStore();
   const [pin, setPin] = useState("");
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -18,7 +22,16 @@ export default function UnlockScreen() {
     setErrorMsg(null);
     try {
       await unlockWallet(pin);
-      navigate("/connect", { replace: true });
+
+      // Auto-connect to default supporter
+      try {
+        const info = await connectNode(DEFAULT_SUPPORTER);
+        setConnected(true, info.network, info.block_height);
+      } catch {
+        // Continue even if connection fails — user can connect manually
+      }
+
+      navigate("/wallet", { replace: true });
     } catch (e) {
       const msg = String(e);
       setErrorMsg(msg);
@@ -27,6 +40,13 @@ export default function UnlockScreen() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleSwitchWallet = async () => {
+    try {
+      await deleteWallet();
+    } catch { /* ignore */ }
+    navigate("/", { replace: true });
   };
 
   return (
@@ -57,7 +77,14 @@ export default function UnlockScreen() {
           disabled={loading}
           className="w-full py-3 rounded-lg bg-[var(--npt-blue)] text-white font-semibold disabled:opacity-50 active:opacity-80"
         >
-          {loading ? "Unlocking..." : "Unlock"}
+          {loading ? "Connecting..." : "Unlock"}
+        </button>
+
+        <button
+          onClick={handleSwitchWallet}
+          className="w-full py-2 text-sm text-[var(--npt-muted)] hover:text-red-400 transition-colors"
+        >
+          Switch Wallet (delete current)
         </button>
       </div>
     </div>

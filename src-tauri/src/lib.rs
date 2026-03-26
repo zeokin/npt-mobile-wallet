@@ -555,9 +555,13 @@ async fn send_transaction(
     }
 
     // Step 10: Generate ProofCollection (THIS IS THE SLOW STEP)
+    // Keep session alive during long proof generation
+    *state.last_activity.lock().unwrap() = Some(Instant::now());
     eprintln!("[SEND] Step 10: Generating ProofCollection — this may take several minutes...");
     let tx = transaction::build_transaction(&transaction_details).await
         .map_err(|e| format!("ProofCollection failed: {}", e))?;
+    // Keep session alive after proof generation
+    *state.last_activity.lock().unwrap() = Some(Instant::now());
     eprintln!("[SEND] Transaction built!");
 
     // Step 11: Submit transaction

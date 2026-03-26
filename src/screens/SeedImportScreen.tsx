@@ -39,7 +39,7 @@ export default function SeedImportScreen() {
     try {
       await importWallet(wordInputs.join(" "), pin);
       toast.success("Wallet imported!");
-      navigate("/connect", { replace: true });
+      navigate("/wallet", { replace: true });
     } catch (e) { toast.error(String(e)); }
   };
 
