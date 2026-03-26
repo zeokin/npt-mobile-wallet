@@ -12,14 +12,17 @@ const DEFAULT_SUPPORTER = "https://wallet.neptunefundamentals.org";
 export default function WalletScreen() {
   const navigate = useNavigate();
   const { network, blockHeight, connected, setConnected } = useSettingsStore();
-  const { balance, utxos, setBalance, setUtxos } = useWalletStore();
+  const { balance, utxos, outgoingTxs, setBalance, setUtxos } = useWalletStore();
   const [syncing, setSyncing] = useState(false);
   const [syncInfo, setSyncInfo] = useState<string | null>(null);
   const [myAddress, setMyAddress] = useState("");
 
-  // Compute confirmed + pending balance
+  // Balance breakdown
   const unspentUtxos = utxos.filter((u) => !u.likely_spent);
   const confirmedBalance = unspentUtxos.reduce((sum, u) => sum + (parseFloat(u.amount) || 0), 0);
+  const pendingOutgoing = outgoingTxs
+    .filter((tx) => tx.status === "pending")
+    .reduce((sum, tx) => sum + (parseFloat(tx.amount) || 0) + (parseFloat(tx.fee) || 0), 0);
 
   // Auto-connect if not connected
   useEffect(() => {
@@ -118,12 +121,19 @@ export default function WalletScreen() {
         {/* Balance */}
         <div className="text-center mb-2">
           <div className="text-4xl font-bold">{confirmedBalance.toFixed(2)} NPT</div>
-          <p className="text-xs text-[var(--npt-muted)]">
-            {unspentUtxos.length} UTXO{unspentUtxos.length !== 1 ? "s" : ""}
-            {utxos.length > unspentUtxos.length && (
-              <> ({utxos.length - unspentUtxos.length} spent)</>
+          <div className="space-y-0.5">
+            <p className="text-xs text-[var(--npt-muted)]">
+              Confirmed: {unspentUtxos.length} UTXO{unspentUtxos.length !== 1 ? "s" : ""}
+              {utxos.length > unspentUtxos.length && (
+                <span className="text-red-400/60"> ({utxos.length - unspentUtxos.length} spent)</span>
+              )}
+            </p>
+            {pendingOutgoing > 0 && (
+              <p className="text-xs text-yellow-400">
+                Pending outgoing: -{pendingOutgoing.toFixed(2)} NPT
+              </p>
             )}
-          </p>
+          </div>
         </div>
 
         {/* My address */}
