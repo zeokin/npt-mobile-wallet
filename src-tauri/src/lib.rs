@@ -309,48 +309,46 @@ async fn send_transaction(
     // - Submit transaction
 
     // Step 4: Get the AOCL leaf index for our UTXO
-    // We need the block BEFORE our UTXO's block to know the AOCL size
+    // Use TYPED deserialization — no JSON field name guessing
     eprintln!("[SEND] Step 4: Computing AOCL leaf index...");
     let utxo_block_height = sync_result.utxos[0].block_height;
 
-    // Get previous block's AOCL leaf count
-    let prev_block = if utxo_block_height > 0 {
-        rpc.get_block(utxo_block_height - 1).await?
-    } else {
-        serde_json::json!(null)
-    };
+    // Get previous block using typed deserialization
+    use neptune_cash::application::json_rpc::core::model::block::RpcBlock;
+    use neptune_cash::protocol::consensus::block::Block;
+    use neptune_cash::prelude::twenty_first::util_types::mmr::mmr_trait::Mmr;
 
-    // Extract AOCL num_leafs from previous block's mutator set accumulator
-    let prev_aocl_leafs: u64 = prev_block
-        .get("block")
-        .and_then(|b| b.get("kernel"))
-        .and_then(|k| k.get("body"))
-        .and_then(|b| b.get("mutatorSetAccumulator"))
-        .and_then(|msa| msa.get("aocl"))
-        .and_then(|aocl| aocl.get("leafCount").or_else(|| aocl.get("leaf_count")).or_else(|| aocl.get("numLeafs")))
-        .and_then(|n| n.as_u64())
-        .unwrap_or(0);
+    let prev_block_json = rpc.get_block(utxo_block_height - 1).await?;
+    let prev_block_response_json = prev_block_json.get("block")
+        .cloned()
+        .unwrap_or(prev_block_json.clone());
+    let prev_rpc_block: RpcBlock = serde_json::from_value(prev_block_response_json)
+        .map_err(|e| format!("Deserialize previous block: {}", e))?;
+    let prev_block: Block = prev_rpc_block.into();
+    let prev_msa = prev_block.mutator_set_accumulator_after()
+        .map_err(|e| format!("Get MSA from previous block: {}", e))?;
+    let prev_aocl_leafs = prev_msa.aocl.num_leafs();
 
-    // Debug: dump the full AOCL structure to see field names
-    let aocl_json = prev_block
-        .get("block")
-        .and_then(|b| b.get("kernel"))
-        .and_then(|k| k.get("body"))
-        .and_then(|b| b.get("mutatorSetAccumulator"))
-        .and_then(|msa| msa.get("aocl"));
-    eprintln!("[SEND] AOCL JSON keys: {:?}",
-        aocl_json.and_then(|a| a.as_object()).map(|o| o.keys().collect::<Vec<_>>()));
-    eprintln!("[SEND] Previous block AOCL leaf count: {}", prev_aocl_leafs);
+    eprintln!("[SEND] Previous block AOCL leaf count (typed): {}", prev_aocl_leafs);
 
-    // Get the transaction kernel for our block to find our output's position
-    let kernel_json = rpc.get_block_transaction_kernel(utxo_block_height).await?
-        .ok_or("Cannot get transaction kernel for UTXO block")?;
-
-    // Find our output position by matching the addition record
-    // The addition record = commit(Hash(utxo), sender_randomness, Hash(receiver_preimage))
+    // Get the FULL block (typed) to find our output's position
     use neptune_cash::prelude::triton_vm::prelude::Tip5;
     use neptune_cash::protocol::proof_abstractions::mast_hash::MastHash;
 
+    let our_block_json = rpc.get_block(utxo_block_height).await?;
+    let our_block_response_json = our_block_json.get("block")
+        .cloned()
+        .unwrap_or(our_block_json.clone());
+    let our_rpc_block: RpcBlock = serde_json::from_value(our_block_response_json)
+        .map_err(|e| format!("Deserialize our block: {}", e))?;
+    let our_block: Block = our_rpc_block.into();
+
+    // Get ALL addition records (tx outputs + guesser fees) — same order as AOCL
+    let block_hash = our_block.hash();
+    let all_additions = our_block.kernel.all_addition_records(block_hash)
+        .map_err(|e| format!("Get addition records: {}", e))?;
+
+    // Compute our expected commitment
     let utxo_hash = Tip5::hash(&input_utxos[0]);
     let receiver_digest = input_receiver_preimages[0].hash();
     let expected_commitment = neptune_cash::util_types::mutator_set::commit(
@@ -359,65 +357,35 @@ async fn send_transaction(
         receiver_digest,
     );
 
-    // Parse outputs from kernel to find matching position
-    let outputs = kernel_json.get("outputs").and_then(|o| o.as_array())
-        .ok_or("Cannot parse outputs from kernel")?;
+    eprintln!("[SEND] Block has {} total additions (tx + guesser fees)", all_additions.len());
+    eprintln!("[SEND] Expected commitment: {:?}", expected_commitment.canonical_commitment);
 
-    eprintln!("[SEND] Block has {} outputs, looking for our commitment...", outputs.len());
-
-    // Debug: show the raw commitment values
-    let expected_digest = expected_commitment.canonical_commitment;
-    let expected_bfes = expected_digest.values();
-    eprintln!("[SEND] Expected commitment BFEs: {:?}",
-        expected_bfes.iter().map(|b| b.value()).collect::<Vec<_>>());
-
-    // Try multiple hex formats to match the RPC output format
-    // Format 1: big-endian u64 per BFE
-    let expected_hex_be: String = expected_bfes.iter()
-        .map(|bfe| format!("{:016x}", bfe.value()))
-        .collect();
-    // Format 2: little-endian bytes
-    let expected_hex_le: String = expected_bfes.iter()
-        .flat_map(|bfe| bfe.value().to_le_bytes())
-        .map(|b| format!("{:02x}", b))
-        .collect::<String>();
-    // Format 3: raw bytes via bincode
-    let expected_hex_bincode = hex::encode(
-        bincode::serialize(&expected_digest).unwrap_or_default()
-    );
-
-    eprintln!("[SEND] Expected hex (BE): {}", expected_hex_be);
-    eprintln!("[SEND] Expected hex (LE): {}", expected_hex_le);
-    eprintln!("[SEND] Expected hex (bincode): {}", expected_hex_bincode);
-
-    let expected_hex = expected_hex_be.clone(); // we'll try matching all formats
-
+    // Find our output position in ALL additions (typed comparison — no hex guessing)
     let mut our_output_index: Option<usize> = None;
-    for (i, output) in outputs.iter().enumerate() {
-        let output_str = output.as_str().unwrap_or("");
-        // Strip 0x prefix if present
-        let output_clean = output_str.strip_prefix("0x").unwrap_or(output_str);
-        eprintln!("[SEND] Output {}: {}...", i, &output_clean.chars().take(40).collect::<String>());
-        if output_clean == expected_hex_be
-            || output_clean == expected_hex_le
-            || output_clean == expected_hex_bincode {
+    for (i, addition) in all_additions.iter().enumerate() {
+        if addition.canonical_commitment == expected_commitment.canonical_commitment {
             our_output_index = Some(i);
-            eprintln!("[SEND] MATCH at index {} !", i);
+            eprintln!("[SEND] MATCH at addition index {} !", i);
             break;
         }
     }
 
-    eprintln!("[SEND] Our output index: {:?}", our_output_index);
-
-    // For now, just report progress — the commitment matching may need adjustment
     let aocl_leaf_index = match our_output_index {
-        Some(idx) => prev_aocl_leafs + idx as u64,
+        Some(idx) => {
+            let index = prev_aocl_leafs + idx as u64;
+            eprintln!("[SEND] AOCL leaf index: {} (prev {} + position {})", index, prev_aocl_leafs, idx);
+            index
+        }
         None => {
+            // Dump all commitments for debugging
+            for (i, addition) in all_additions.iter().enumerate() {
+                eprintln!("[SEND] Addition {}: {:?}", i, addition.canonical_commitment);
+            }
             return Err(format!(
-                "Could not find our UTXO in block {} outputs. \
-                 Expected commitment: {}. This may be a format mismatch. \
-                 Previous AOCL leafs: {}, Block outputs: {}",
-                utxo_block_height, expected_hex, prev_aocl_leafs, outputs.len()
+                "Could not find our UTXO in block {} additions ({} total). \
+                 Expected: {:?}",
+                utxo_block_height, all_additions.len(),
+                expected_commitment.canonical_commitment
             ));
         }
     };
