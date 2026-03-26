@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { invoke } from "@tauri-apps/api/core";
 import { useSettingsStore } from "../store/settings-store";
-import { useWalletStore, type OutgoingTx } from "../store/wallet-store";
+import { useWalletStore } from "../store/wallet-store";
 import NavBar from "../components/ui/NavBar";
 
 export default function SendScreen() {
