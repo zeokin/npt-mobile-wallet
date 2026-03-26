@@ -38,6 +38,8 @@ pub struct DiscoveredUtxo {
     pub sender_randomness_hex: String,
     /// Hex-encoded bincode of the receiver_preimage Digest.
     pub receiver_preimage_hex: String,
+    /// AOCL leaf index — stored at discovery time for correct spending.
+    pub aocl_leaf_index: Option<u64>,
 }
 
 /// Result of a wallet sync operation.
@@ -166,6 +168,7 @@ pub async fn scan_for_utxos(
                             utxo_hex,
                             sender_randomness_hex: sr_hex,
                             receiver_preimage_hex: rp_hex,
+                            aocl_leaf_index: None, // computed below
                         });
                     }
                     Err(_) => continue,
@@ -174,12 +177,86 @@ pub async fn scan_for_utxos(
         }
     }
 
-    // Calculate balance summary
-    let balance = if discovered.is_empty() {
+    // Step 6: Compute AOCL indices and check spent status
+    // Group UTXOs by block height to minimize RPC calls
+    use neptune_cash::application::json_rpc::core::model::wallet::block::RpcWalletBlock;
+    use neptune_cash::protocol::consensus::block::block_kernel::BlockKernel;
+    use neptune_cash::prelude::twenty_first::util_types::mmr::mmr_trait::Mmr;
+    use neptune_cash::util_types::mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
+
+    for utxo_data in &mut discovered {
+        // Get previous block to compute AOCL leaf count
+        if utxo_data.block_height > 0 {
+            if let Ok(prev_json) = rpc.get_wallet_blocks(utxo_data.block_height - 1, utxo_data.block_height - 1).await {
+                if let Ok(blocks) = serde_json::from_value::<Vec<RpcWalletBlock>>(
+                    prev_json.get("blocks").cloned().unwrap_or(prev_json.clone())
+                ) {
+                    if let Some(prev_rpc) = blocks.into_iter().next() {
+                        let prev_hash = prev_rpc.hash();
+                        let prev_kernel: BlockKernel = prev_rpc.kernel.into();
+                        if let Ok(guesser_fees) = prev_kernel.guesser_fee_addition_records(prev_hash) {
+                            let prev_msa = prev_kernel.body.mutator_set_accumulator_after(guesser_fees);
+                            let prev_aocl = prev_msa.aocl.num_leafs();
+
+                            // Get our block to find output position
+                            if let Ok(our_json) = rpc.get_wallet_blocks(utxo_data.block_height, utxo_data.block_height).await {
+                                if let Ok(our_blocks) = serde_json::from_value::<Vec<RpcWalletBlock>>(
+                                    our_json.get("blocks").cloned().unwrap_or(our_json.clone())
+                                ) {
+                                    if let Some(our_rpc) = our_blocks.into_iter().next() {
+                                        let our_hash = our_rpc.hash();
+                                        let our_kernel: BlockKernel = our_rpc.kernel.into();
+                                        if let Ok(all_additions) = our_kernel.all_addition_records(our_hash) {
+                                            // Deserialize UTXO to compute commitment
+                                            if let Ok(utxo_bytes) = hex::decode(&utxo_data.utxo_hex) {
+                                                if let Ok(utxo) = bincode::deserialize::<neptune_cash::protocol::consensus::transaction::utxo::Utxo>(&utxo_bytes) {
+                                                    if let Ok(sr_bytes) = hex::decode(&utxo_data.sender_randomness_hex) {
+                                                        if let Ok(sr) = bincode::deserialize::<neptune_cash::prelude::triton_vm::prelude::Digest>(&sr_bytes) {
+                                                            if let Ok(rp_bytes) = hex::decode(&utxo_data.receiver_preimage_hex) {
+                                                                if let Ok(rp) = bincode::deserialize::<neptune_cash::prelude::triton_vm::prelude::Digest>(&rp_bytes) {
+                                                                    let item = neptune_cash::prelude::triton_vm::prelude::Tip5::hash(&utxo);
+                                                                    let receiver_digest = rp.hash();
+                                                                    let commitment = neptune_cash::util_types::mutator_set::commit(item, sr, receiver_digest);
+
+                                                                    for (i, addition) in all_additions.iter().enumerate() {
+                                                                        if addition.canonical_commitment == commitment.canonical_commitment {
+                                                                            let aocl_idx = prev_aocl + i as u64;
+                                                                            utxo_data.aocl_leaf_index = Some(aocl_idx);
+
+                                                                            // Check bloom filter (spent status)
+                                                                            let abs_set = AbsoluteIndexSet::compute(item, sr, rp, aocl_idx);
+                                                                            if let Ok(abs_json) = serde_json::to_value(&abs_set) {
+                                                                                if let Ok(is_spent) = rpc.are_bloom_indices_set(&abs_json).await {
+                                                                                    utxo_data.likely_spent = is_spent;
+                                                                                }
+                                                                            }
+                                                                            break;
+                                                                        }
+                                                                    }
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Calculate balance summary (only unspent UTXOs)
+    let unspent: Vec<&DiscoveredUtxo> = discovered.iter().filter(|u| !u.likely_spent).collect();
+    let balance = if unspent.is_empty() {
         "0".to_string()
     } else {
-        let amounts: Vec<&str> = discovered.iter().map(|u| u.amount.as_str()).collect();
-        format!("{} UTXOs ({})", discovered.len(), amounts.join(" + "))
+        let amounts: Vec<&str> = unspent.iter().map(|u| u.amount.as_str()).collect();
+        format!("{} UTXOs ({})", unspent.len(), amounts.join(" + "))
     };
 
     Ok(SyncResult {
