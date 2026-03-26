@@ -534,6 +534,31 @@ async fn send_transaction(
     );
     eprintln!("[SEND] TransactionDetails built");
 
+    // Step 9.5: Validate membership proof before expensive proof generation
+    eprintln!("[SEND] Step 9.5: Validating membership proof...");
+    {
+        use neptune_cash::prelude::twenty_first::util_types::mmr::mmr_trait::Mmr;
+
+        let item = Tip5::hash(&input_utxos[0]);
+        let msa = &transaction_details.mutator_set_accumulator;
+        let pw = transaction_details.primitive_witness();
+        let is_valid = msa.verify(item, &pw.input_membership_proofs[0]);
+
+        eprintln!("[SEND] Membership proof valid: {}", is_valid);
+        eprintln!("[SEND] MSA AOCL leafs: {}", msa.aocl.num_leafs());
+        eprintln!("[SEND] Kernel MSA hash: {:?}", transaction_details.transaction_kernel().mutator_set_hash);
+        eprintln!("[SEND] MSA hash: {:?}", msa.hash());
+
+        if !is_valid {
+            return Err(format!(
+                "Membership proof validation failed. \
+                 AOCL index: {}, MSA AOCL leafs: {}. \
+                 The proof from the supporter may be stale or incorrect.",
+                aocl_leaf_index, msa.aocl.num_leafs()
+            ));
+        }
+    }
+
     // Step 10: Generate ProofCollection (THIS IS THE SLOW STEP)
     eprintln!("[SEND] Step 10: Generating ProofCollection — this may take several minutes...");
     let tx = transaction::build_transaction(&transaction_details).await
