@@ -251,18 +251,39 @@ async fn send_transaction(
     // Step 1: Re-scan to get fresh UTXOs with spending data
     eprintln!("[SEND] Step 1: Scanning for UTXOs...");
     let sync_result = sync::scan_for_utxos(&rpc, &entropy, 5, 1).await?;
-    if sync_result.utxos.is_empty() {
-        return Err("No UTXOs found. Sync your wallet first.".to_string());
+    let unspent_utxos: Vec<_> = sync_result.utxos.iter().filter(|u| !u.likely_spent).collect();
+    if unspent_utxos.is_empty() {
+        return Err("No unspent UTXOs found. Sync your wallet first.".to_string());
     }
-    eprintln!("[SEND] Found {} UTXOs", sync_result.utxos.len());
 
-    // Step 2: Deserialize the first UTXO's data for spending
-    // For now, use all available UTXOs as inputs
+    // Early balance check — before any expensive operations
+    {
+        use num_traits::{CheckedAdd, Zero};
+        let total_needed = amount_val.checked_add(&fee_val).ok_or("Amount + fee overflow")?;
+        let mut available = neptune_cash::api::export::NativeCurrencyAmount::zero();
+        for u in &unspent_utxos {
+            if let Ok(bytes) = hex::decode(&u.utxo_hex) {
+                if let Ok(utxo) = bincode::deserialize::<neptune_cash::protocol::consensus::transaction::utxo::Utxo>(&bytes) {
+                    available = available + utxo.get_native_currency_amount();
+                }
+            }
+        }
+        if available < total_needed {
+            return Err(format!(
+                "Insufficient balance: have {}, need {} (amount {} + fee {})",
+                available, total_needed, amount, fee
+            ));
+        }
+        eprintln!("[SEND] Balance check passed: have {}, need {}", available, total_needed);
+    }
+    eprintln!("[SEND] Found {} unspent UTXOs", unspent_utxos.len());
+
+    // Step 2: Deserialize the first unspent UTXO's data for spending
     let mut input_utxos = Vec::new();
     let mut input_sender_randomnesses = Vec::new();
     let mut input_receiver_preimages = Vec::new();
 
-    for utxo_data in &sync_result.utxos {
+    for utxo_data in &unspent_utxos {
         let utxo_bytes = hex::decode(&utxo_data.utxo_hex)
             .map_err(|e| format!("Decode UTXO hex: {}", e))?;
         let utxo: neptune_cash::protocol::consensus::transaction::utxo::Utxo =
