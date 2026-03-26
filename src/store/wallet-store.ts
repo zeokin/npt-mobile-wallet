@@ -19,12 +19,15 @@ interface WalletState {
 }
 
 export interface OutgoingTx {
-  txid: string;
   recipient: string;
   amount: string;
   fee: string;
   timestamp: number;
   status: "pending" | "confirmed";
+  /// Hex-encoded addition records of outputs (for checking confirmation via wasMined)
+  addition_record_hexes: string[];
+  /// Block height where confirmed (if known)
+  confirmed_height?: number;
 }
 
 export const useWalletStore = create<WalletState>()(

@@ -203,6 +203,12 @@ impl RpcClient {
         self.call("wallet_submitTransaction", params.clone()).await
     }
 
+    /// Check if a transaction was mined by checking its outputs.
+    /// Method: utxoindex_wasMined
+    pub async fn was_mined(&self, params: &Value) -> Result<Value, String> {
+        self.call("utxoindex_wasMined", params.clone()).await
+    }
+
     // ── UTXO Scanning Endpoints ─────────────────────────────────
 
     /// Find blocks containing announcements matching our flags.

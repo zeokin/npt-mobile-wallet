@@ -42,6 +42,10 @@ export interface DiscoveredUtxo {
 export const syncWallet = (pin: string | null, numKeys?: number) =>
   invoke<SyncResult>("sync_wallet", { pin: pin || null, numKeys: numKeys || null });
 
+// Check if a transaction was mined (by its output addition records)
+export const checkTransactionMined = (additionRecordHexes: string[]) =>
+  invoke<number[]>("check_transaction_mined", { additionRecordHexes });
+
 // Supporter connection
 export interface ConnectionInfo { network: string; block_height: number; }
 export const connectNode = (url: string, authToken?: string) =>

@@ -1,5 +1,6 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useWalletStore } from "../store/wallet-store";
+import { checkTransactionMined } from "../api/rpc";
 import NavBar from "../components/ui/NavBar";
 
 export default function HistoryScreen() {
@@ -10,6 +11,30 @@ export default function HistoryScreen() {
   const incoming = [...utxos].sort((a, b) => b.block_height - a.block_height);
   // Outgoing: locally stored after send
   const outgoing = outgoingTxs;
+
+  // Check confirmation status for pending outgoing transactions
+  useEffect(() => {
+    const checkPending = async () => {
+      for (const tx of outgoing) {
+        if (tx.status === "pending" && tx.addition_record_hexes?.length > 0) {
+          try {
+            const heights = await checkTransactionMined(tx.addition_record_hexes);
+            if (heights.length > 0) {
+              // Update status to confirmed
+              const store = useWalletStore.getState();
+              const updated = store.outgoingTxs.map((t) =>
+                t.timestamp === tx.timestamp
+                  ? { ...t, status: "confirmed" as const, confirmed_height: heights[0] }
+                  : t
+              );
+              useWalletStore.setState({ outgoingTxs: updated });
+            }
+          } catch { /* ignore errors during check */ }
+        }
+      }
+    };
+    checkPending();
+  }, [tab]); // Check when switching to history tab
 
   return (
     <div className="flex flex-col h-full">
@@ -64,9 +89,13 @@ export default function HistoryScreen() {
                   {utxo.likely_spent && " (spent)"}
                 </p>
               </div>
-              <span className={`font-mono text-sm ${
-                utxo.likely_spent ? "text-[var(--npt-muted)] line-through" : "text-green-400"
-              }`}>
+              <span
+                className={`font-mono text-sm ${
+                  utxo.likely_spent
+                    ? "text-[var(--npt-muted)] line-through"
+                    : "text-green-400"
+                }`}
+              >
                 +{utxo.amount}
               </span>
             </div>
@@ -75,9 +104,6 @@ export default function HistoryScreen() {
         {tab === "out" && outgoing.length === 0 && (
           <div className="text-center mt-8 space-y-2">
             <p className="text-sm text-[var(--npt-muted)]">No outgoing transactions yet.</p>
-            <p className="text-xs text-[var(--npt-muted)]">
-              Outgoing transactions will appear after you send NPT.
-            </p>
           </div>
         )}
         {tab === "out" &&
@@ -88,16 +114,26 @@ export default function HistoryScreen() {
             >
               <div className="text-sm">
                 <p className="text-[var(--npt-muted)]">
-                  {new Date(tx.timestamp).toLocaleDateString()}
+                  {new Date(tx.timestamp).toLocaleDateString()}{" "}
+                  {new Date(tx.timestamp).toLocaleTimeString()}
                 </p>
                 <p className="text-xs text-[var(--npt-muted)] truncate max-w-[180px]">
-                  To: {tx.recipient.slice(0, 20)}...
+                  To: {tx.recipient.slice(0, 16)}...
                 </p>
-                <p className="text-xs text-[var(--npt-muted)]">
-                  {tx.status === "pending" ? "Pending" : "Confirmed"}
+                <p className="text-xs">
+                  {tx.status === "confirmed" ? (
+                    <span className="text-green-400">
+                      Confirmed{tx.confirmed_height ? ` (block ${tx.confirmed_height})` : ""}
+                    </span>
+                  ) : (
+                    <span className="text-yellow-400">Pending</span>
+                  )}
                 </p>
               </div>
-              <span className="font-mono text-sm text-red-400">-{tx.amount}</span>
+              <div className="text-right">
+                <span className="font-mono text-sm text-red-400">-{tx.amount}</span>
+                <p className="text-xs text-[var(--npt-muted)]">fee: {tx.fee}</p>
+              </div>
             </div>
           ))}
       </div>

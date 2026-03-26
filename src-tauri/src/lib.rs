@@ -594,7 +594,58 @@ async fn send_transaction(
     let submit_result = rpc.submit_transaction(&submit_params).await?;
     eprintln!("[SEND] Submitted! Response: {}", submit_result);
 
-    Ok(format!("Transaction sent successfully!"))
+    // Return addition record hexes for tracking confirmation via wasMined
+    let kernel = transaction_details.transaction_kernel();
+    let addition_hexes: Vec<String> = kernel.outputs.iter()
+        .map(|ar| hex::encode(bincode::serialize(&ar.canonical_commitment).unwrap_or_default()))
+        .collect();
+    eprintln!("[SEND] Output addition records: {:?}", addition_hexes);
+
+    let result = serde_json::json!({
+        "success": true,
+        "addition_record_hexes": addition_hexes,
+    });
+    Ok(serde_json::to_string(&result).unwrap_or_else(|_| "Transaction sent!".to_string()))
+}
+
+/// Check if a transaction's outputs were mined.
+/// Takes addition record hex strings, returns block heights if mined.
+#[tauri::command]
+async fn check_transaction_mined(
+    addition_record_hexes: Vec<String>,
+    state: State<'_, AppState>,
+) -> Result<Vec<u64>, String> {
+    check_session(&state)?;
+    let rpc = get_rpc(&state)?;
+
+    use neptune_cash::application::json_rpc::core::model::message::WasMinedRequest;
+    use neptune_cash::application::json_rpc::core::model::block::transaction_kernel::RpcAdditionRecord;
+
+    // Deserialize addition records from hex
+    let mut addition_records = Vec::new();
+    for hex_str in &addition_record_hexes {
+        let bytes = hex::decode(hex_str).map_err(|e| format!("Decode hex: {}", e))?;
+        let commitment: neptune_cash::prelude::triton_vm::prelude::Digest =
+            bincode::deserialize(&bytes).map_err(|e| format!("Deserialize: {}", e))?;
+        addition_records.push(RpcAdditionRecord(commitment));
+    }
+
+    let request = WasMinedRequest {
+        absolute_index_sets: vec![], // we're checking outputs, not inputs
+        addition_records,
+    };
+    let params = serde_json::to_value(&request)
+        .map_err(|e| format!("Serialize: {}", e))?;
+
+    let result = rpc.was_mined(&params).await?;
+
+    let heights = result.get("blockHeights")
+        .or_else(|| result.get("block_heights"))
+        .and_then(|v| v.as_array())
+        .map(|arr| arr.iter().filter_map(|v| v.as_u64()).collect())
+        .unwrap_or_default();
+
+    Ok(heights)
 }
 
 /// Scan the blockchain for UTXOs belonging to this wallet.
@@ -749,6 +800,7 @@ pub fn run() {
             // UTXO scanning + sending
             sync_wallet,
             send_transaction,
+            check_transaction_mined,
             // Supporter
             connect_node,
             disconnect_node,

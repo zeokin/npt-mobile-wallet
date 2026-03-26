@@ -48,7 +48,7 @@ export default function SendScreen() {
     setStatus("Building transaction locally...");
 
     try {
-      await invoke<string>("send_transaction", {
+      const resultStr = await invoke<string>("send_transaction", {
         pin,
         recipientAddress: address.trim(),
         amount,
@@ -56,13 +56,20 @@ export default function SendScreen() {
         utxoIndices: unspentUtxos.map((_, i) => i),
       });
 
+      // Parse addition records from response
+      let additionRecordHexes: string[] = [];
+      try {
+        const parsed = JSON.parse(resultStr);
+        additionRecordHexes = parsed.addition_record_hexes || [];
+      } catch { /* ignore parse errors */ }
+
       addOutgoingTx({
-        txid: "local",
         recipient: address.trim(),
         amount,
         fee,
         timestamp: Date.now(),
         status: "pending",
+        addition_record_hexes: additionRecordHexes,
       });
       toast.success("Transaction sent!");
       setStatus("");
