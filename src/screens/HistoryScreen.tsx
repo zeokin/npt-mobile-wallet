@@ -6,8 +6,8 @@ export default function HistoryScreen() {
   const [tab, setTab] = useState<"in" | "out">("in");
   const { utxos, outgoingTxs } = useWalletStore();
 
-  // Incoming: ALL discovered UTXOs (including spent ones for history)
-  const incoming = utxos;
+  // Incoming: ALL discovered UTXOs, sorted by block height (newest first)
+  const incoming = [...utxos].sort((a, b) => b.block_height - a.block_height);
   // Outgoing: locally stored after send
   const outgoing = outgoingTxs;
 
