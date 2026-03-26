@@ -186,17 +186,21 @@ impl RpcClient {
 
     /// Restore membership proofs for spending UTXOs.
     /// Method: wallet_restoreMembershipProof
+    /// Params are pre-serialized via RestoreMembershipProofRequest (Serialize_tuple)
     pub async fn restore_membership_proof(
         &self,
-        absolute_index_sets: &Value,
+        params: &Value,
     ) -> Result<Value, String> {
-        self.call("wallet_restoreMembershipProof", json!([absolute_index_sets])).await
+        // params is already serialized from RestoreMembershipProofRequest
+        // which is Serialize_tuple, so it's already an array like [[...]]
+        self.call("wallet_restoreMembershipProof", params.clone()).await
     }
 
     /// Submit a locally-built transaction.
     /// Method: wallet_submitTransaction
-    pub async fn submit_transaction(&self, transaction: &Value) -> Result<Value, String> {
-        self.call("wallet_submitTransaction", json!([transaction])).await
+    /// Params are pre-serialized via SubmitTransactionRequest (Serialize_tuple)
+    pub async fn submit_transaction(&self, params: &Value) -> Result<Value, String> {
+        self.call("wallet_submitTransaction", params.clone()).await
     }
 
     // ── UTXO Scanning Endpoints ─────────────────────────────────

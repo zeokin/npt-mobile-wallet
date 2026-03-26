@@ -535,9 +535,11 @@ async fn send_transaction(
     eprintln!("[SEND] Step 11: Submitting transaction...");
     let rpc_tx: neptune_cash::application::json_rpc::core::model::wallet::transaction::RpcTransaction = tx.try_into()
         .map_err(|e: String| format!("Convert to RPC transaction: {}", e))?;
-    let tx_json = serde_json::to_value(&rpc_tx)
-        .map_err(|e| format!("Serialize transaction: {}", e))?;
-    let submit_result = rpc.submit_transaction(&tx_json).await?;
+    use neptune_cash::application::json_rpc::core::model::message::SubmitTransactionRequest;
+    let submit_request = SubmitTransactionRequest { transaction: rpc_tx };
+    let submit_params = serde_json::to_value(&submit_request)
+        .map_err(|e| format!("Serialize submit request: {}", e))?;
+    let submit_result = rpc.submit_transaction(&submit_params).await?;
     eprintln!("[SEND] Submitted! Response: {}", submit_result);
 
     Ok(format!("Transaction sent successfully!"))
