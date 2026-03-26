@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { ArrowUpRight, ArrowDownLeft, RefreshCw } from "lucide-react";
+import { ArrowUpRight, RefreshCw, Copy } from "lucide-react";
 import { toast } from "sonner";
-import { getBlockHeight, syncWallet, connectNode } from "../api/rpc";
+import { getBlockHeight, syncWallet, connectNode, generateLocalAddress } from "../api/rpc";
 import { useSettingsStore } from "../store/settings-store";
 import { useWalletStore } from "../store/wallet-store";
 import NavBar from "../components/ui/NavBar";
@@ -12,15 +12,29 @@ const DEFAULT_SUPPORTER = "https://wallet.neptunefundamentals.org";
 export default function WalletScreen() {
   const navigate = useNavigate();
   const { network, blockHeight, connected, setConnected } = useSettingsStore();
-  const { balance, setBalance, setUtxos } = useWalletStore();
+  const { balance, utxos, setBalance, setUtxos } = useWalletStore();
   const [syncing, setSyncing] = useState(false);
   const [syncInfo, setSyncInfo] = useState<string | null>(null);
+  const [myAddress, setMyAddress] = useState("");
+
+  // Compute confirmed + pending balance
+  const unspentUtxos = utxos.filter((u) => !u.likely_spent);
+  const confirmedBalance = unspentUtxos.reduce((sum, u) => sum + (parseFloat(u.amount) || 0), 0);
 
   // Auto-connect if not connected
   useEffect(() => {
     if (!connected) {
       connectNode(DEFAULT_SUPPORTER)
         .then((info) => setConnected(true, info.network, info.block_height))
+        .catch(() => {});
+    }
+  }, []);
+
+  // Generate address automatically
+  useEffect(() => {
+    if (!myAddress) {
+      generateLocalAddress(null, 0, "generation", network || "main")
+        .then((addr) => setMyAddress(addr))
         .catch(() => {});
     }
   }, []);
@@ -62,8 +76,6 @@ export default function WalletScreen() {
       );
       if (result.utxo_count > 0) {
         toast.success(`Found ${result.utxo_count} UTXOs`);
-      } else {
-        toast.info("No UTXOs found");
       }
     } catch (e) {
       setSyncInfo(null);
@@ -73,9 +85,22 @@ export default function WalletScreen() {
     }
   };
 
+  const handleCopyAddress = () => {
+    if (myAddress) {
+      navigator.clipboard.writeText(myAddress);
+      toast.success("Address copied!");
+    }
+  };
+
+  // Truncate address for display
+  const displayAddress = myAddress
+    ? `${myAddress.slice(0, 16)}...${myAddress.slice(-8)}`
+    : "Generating...";
+
   return (
     <div className="flex flex-col h-full">
       <div className="flex-1 flex flex-col items-center justify-center px-6">
+        {/* Network info */}
         <div className="text-center space-y-1 mb-2">
           {network && (
             <span className="text-xs px-2 py-0.5 rounded bg-[var(--npt-blue)]/20 text-[var(--npt-blue)]">
@@ -90,12 +115,32 @@ export default function WalletScreen() {
           <p className="text-xs text-[var(--npt-muted)]">Block {blockHeight}</p>
         </div>
 
-        <div className="text-4xl font-bold mb-2">{balance} NPT</div>
+        {/* Balance */}
+        <div className="text-center mb-2">
+          <div className="text-4xl font-bold">{confirmedBalance.toFixed(2)} NPT</div>
+          <p className="text-xs text-[var(--npt-muted)]">
+            {unspentUtxos.length} UTXO{unspentUtxos.length !== 1 ? "s" : ""}
+            {utxos.length > unspentUtxos.length && (
+              <> ({utxos.length - unspentUtxos.length} spent)</>
+            )}
+          </p>
+        </div>
 
+        {/* My address */}
+        <button
+          onClick={handleCopyAddress}
+          className="flex items-center gap-1 mb-4 px-3 py-1.5 rounded-lg bg-[var(--npt-card)] border border-[var(--npt-border)] hover:border-[var(--npt-blue)] transition-colors"
+        >
+          <span className="text-xs font-mono text-[var(--npt-muted)]">{displayAddress}</span>
+          <Copy size={12} className="text-[var(--npt-blue)]" />
+        </button>
+
+        {/* Sync info */}
         {syncInfo && (
           <p className="text-xs text-[var(--npt-muted)] mb-4">{syncInfo}</p>
         )}
 
+        {/* Sync button */}
         <button
           onClick={doSync}
           disabled={syncing}
@@ -105,20 +150,13 @@ export default function WalletScreen() {
           {syncing ? "Syncing..." : "Sync Wallet"}
         </button>
 
-        <div className="flex gap-4">
-          <button
-            onClick={() => navigate("/send")}
-            className="flex items-center gap-2 px-6 py-3 rounded-lg bg-[var(--npt-blue)] text-white font-semibold active:opacity-80"
-          >
-            <ArrowUpRight size={18} /> Send
-          </button>
-          <button
-            onClick={() => navigate("/receive")}
-            className="flex items-center gap-2 px-6 py-3 rounded-lg bg-[var(--npt-card)] border border-[var(--npt-border)] text-[var(--npt-text)] font-semibold active:opacity-80"
-          >
-            <ArrowDownLeft size={18} /> Receive
-          </button>
-        </div>
+        {/* Send button */}
+        <button
+          onClick={() => navigate("/send")}
+          className="flex items-center gap-2 px-8 py-3 rounded-lg bg-[var(--npt-blue)] text-white font-semibold active:opacity-80"
+        >
+          <ArrowUpRight size={18} /> Send NPT
+        </button>
       </div>
       <NavBar />
     </div>

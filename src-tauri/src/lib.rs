@@ -231,7 +231,7 @@ fn generate_local_address(
 #[tauri::command]
 async fn send_transaction(
     app: tauri::AppHandle,
-    pin: Option<String>,
+    pin: String,
     recipient_address: String,
     amount: String,
     fee: String,
@@ -241,11 +241,7 @@ async fn send_transaction(
     check_session(&state)?;
     touch_session(&state);
     let rpc = get_rpc(&state)?;
-    let actual_pin = pin.unwrap_or_else(|| get_cached_pin(&state).unwrap_or_default());
-    if actual_pin.is_empty() {
-        return Err("PIN required".to_string());
-    }
-    let entropy = get_wallet_entropy(&app, &actual_pin)?;
+    let entropy = get_wallet_entropy(&app, &pin)?;
 
     // Parse amounts
     let amount_val = neptune_cash::api::export::NativeCurrencyAmount::coins_from_str(&amount)
