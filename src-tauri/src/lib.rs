@@ -133,12 +133,12 @@ fn unlock_wallet(
             if *attempts >= MAX_PIN_ATTEMPTS {
                 *state.lockout_until.lock().unwrap() = Some(Instant::now());
                 Err(format!(
-                    "Wrong PIN. Too many attempts — locked for {} seconds.",
+                    "Wrong password. Too many attempts — locked for {} seconds.",
                     PIN_COOLDOWN_SECS
                 ))
             } else {
                 let remaining = MAX_PIN_ATTEMPTS - *attempts;
-                Err(format!("Wrong PIN. {} attempts remaining.", remaining))
+                Err(format!("Wrong password. {} attempts remaining.", remaining))
             }
         }
     }

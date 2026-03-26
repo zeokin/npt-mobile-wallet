@@ -30,12 +30,12 @@ export default function SeedImportScreen() {
   };
 
   const handleSetPin = () => {
-    if (pin.length < 4) { toast.error("PIN must be at least 4 characters"); return; }
+    if (pin.length < 8) { toast.error("Password must be at least 8 characters"); return; }
     setStep("confirm");
   };
 
   const handleConfirm = async () => {
-    if (pin !== confirmPin) { toast.error("PINs do not match"); setConfirmPin(""); return; }
+    if (pin !== confirmPin) { toast.error("Passwords do not match"); setConfirmPin(""); return; }
     try {
       await importWallet(wordInputs.join(" "), pin);
       toast.success("Wallet imported!");
@@ -72,11 +72,11 @@ export default function SeedImportScreen() {
 
         {step === "pin" && (
           <div className="space-y-4">
-            <p className="text-sm text-[var(--npt-muted)] text-center">Choose a PIN to encrypt your seed.</p>
-            <input type="password" inputMode="numeric" placeholder="Enter PIN" value={pin}
+            <p className="text-sm text-[var(--npt-muted)] text-center">Choose a password to encrypt your seed.</p>
+            <input type="password" placeholder="Enter password" value={pin}
               onChange={(e) => setPin(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && handleSetPin()}
-              className="w-full px-3 py-3 rounded-lg bg-[var(--npt-card)] border border-[var(--npt-border)] text-[var(--npt-text)] text-center text-2xl tracking-[0.5em] focus:outline-none focus:border-[var(--npt-blue)]" />
+              className="w-full px-3 py-3 rounded-lg bg-[var(--npt-card)] border border-[var(--npt-border)] text-[var(--npt-text)] text-center text-2xl focus:outline-none focus:border-[var(--npt-blue)]" />
             <button onClick={handleSetPin}
               className="w-full py-3 rounded-lg bg-[var(--npt-blue)] text-white font-semibold">Next</button>
           </div>
@@ -84,11 +84,11 @@ export default function SeedImportScreen() {
 
         {step === "confirm" && (
           <div className="space-y-4">
-            <p className="text-sm text-[var(--npt-muted)] text-center">Confirm your PIN.</p>
-            <input type="password" inputMode="numeric" placeholder="Confirm PIN" value={confirmPin}
+            <p className="text-sm text-[var(--npt-muted)] text-center">Confirm your password.</p>
+            <input type="password" placeholder="Confirm password" value={confirmPin}
               onChange={(e) => setConfirmPin(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && handleConfirm()}
-              className="w-full px-3 py-3 rounded-lg bg-[var(--npt-card)] border border-[var(--npt-border)] text-[var(--npt-text)] text-center text-2xl tracking-[0.5em] focus:outline-none focus:border-[var(--npt-blue)]" />
+              className="w-full px-3 py-3 rounded-lg bg-[var(--npt-card)] border border-[var(--npt-border)] text-[var(--npt-text)] text-center text-2xl focus:outline-none focus:border-[var(--npt-blue)]" />
             <button onClick={handleConfirm}
               className="w-full py-3 rounded-lg bg-[var(--npt-blue)] text-white font-semibold">Import Wallet</button>
           </div>

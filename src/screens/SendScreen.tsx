@@ -40,7 +40,7 @@ export default function SendScreen() {
 
   const handleSend = async () => {
     if (!pin) {
-      toast.error("Enter your PIN to confirm");
+      toast.error("Enter your password to confirm");
       return;
     }
     setStep("form");
@@ -168,11 +168,11 @@ export default function SendScreen() {
               </p>
             </div>
 
-            <input type="password" inputMode="numeric" placeholder="Enter PIN to confirm"
+            <input type="password" placeholder="Enter password to confirm"
               value={pin} autoFocus
               onChange={(e) => setPin(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && handleSend()}
-              className="w-full px-3 py-3 rounded-lg bg-[var(--npt-card)] border border-[var(--npt-border)] text-[var(--npt-text)] text-center text-2xl tracking-[0.5em] focus:outline-none focus:border-[var(--npt-blue)]" />
+              className="w-full px-3 py-3 rounded-lg bg-[var(--npt-card)] border border-[var(--npt-border)] text-[var(--npt-text)] text-center text-2xl focus:outline-none focus:border-[var(--npt-blue)]" />
 
             <div className="flex gap-3">
               <button onClick={() => { setStep("form"); setPin(""); }}

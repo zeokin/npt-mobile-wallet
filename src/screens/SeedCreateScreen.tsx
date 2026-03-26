@@ -45,8 +45,8 @@ export default function SeedCreateScreen() {
 
   // ── PIN Step ──────────────────────────────────────────
   const handleSetPin = () => {
-    if (pin.length < 4) {
-      toast.error("PIN must be at least 4 characters");
+    if (pin.length < 8) {
+      toast.error("Password must be at least 8 characters");
       return;
     }
     setStep("confirm");
@@ -55,7 +55,7 @@ export default function SeedCreateScreen() {
   // ── Confirm PIN + Generate Wallet ─────────────────────
   const handleConfirmPin = async () => {
     if (pin !== confirmPin) {
-      toast.error("PINs do not match");
+      toast.error("Passwords do not match");
       setConfirmPin("");
       return;
     }
@@ -136,20 +136,20 @@ export default function SeedCreateScreen() {
           <h1 className="text-xl font-bold mt-2">Create Wallet</h1>
         </div>
 
-        {/* Step 1: Enter PIN */}
+        {/* Step 1: Enter password */}
         {step === "pin" && (
           <div className="space-y-4">
             <p className="text-sm text-[var(--npt-muted)] text-center">
-              Choose a PIN to encrypt your seed.
+              Choose a password to encrypt your seed.
             </p>
             <input
               type="password"
               inputMode="numeric"
-              placeholder="Enter PIN"
+              placeholder="Enter password"
               value={pin}
               onChange={(e) => setPin(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && handleSetPin()}
-              className="w-full px-3 py-3 rounded-lg bg-[var(--npt-card)] border border-[var(--npt-border)] text-[var(--npt-text)] text-center text-2xl tracking-[0.5em] focus:outline-none focus:border-[var(--npt-blue)]"
+              className="w-full px-3 py-3 rounded-lg bg-[var(--npt-card)] border border-[var(--npt-border)] text-[var(--npt-text)] text-center text-2xl focus:outline-none focus:border-[var(--npt-blue)]"
             />
             <button
               onClick={handleSetPin}
@@ -169,7 +169,7 @@ export default function SeedCreateScreen() {
         {/* Step 2: Confirm PIN */}
         {step === "confirm" && (
           <div className="space-y-4">
-            <p className="text-sm text-[var(--npt-muted)] text-center">Confirm your PIN.</p>
+            <p className="text-sm text-[var(--npt-muted)] text-center">Confirm your password.</p>
             <input
               type="password"
               inputMode="numeric"
@@ -177,7 +177,7 @@ export default function SeedCreateScreen() {
               value={confirmPin}
               onChange={(e) => setConfirmPin(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && handleConfirmPin()}
-              className="w-full px-3 py-3 rounded-lg bg-[var(--npt-card)] border border-[var(--npt-border)] text-[var(--npt-text)] text-center text-2xl tracking-[0.5em] focus:outline-none focus:border-[var(--npt-blue)]"
+              className="w-full px-3 py-3 rounded-lg bg-[var(--npt-card)] border border-[var(--npt-border)] text-[var(--npt-text)] text-center text-2xl focus:outline-none focus:border-[var(--npt-blue)]"
             />
             <button
               onClick={handleConfirmPin}
