@@ -331,6 +331,15 @@ async fn send_transaction(
         .and_then(|n| n.as_u64())
         .unwrap_or(0);
 
+    // Debug: dump the full AOCL structure to see field names
+    let aocl_json = prev_block
+        .get("block")
+        .and_then(|b| b.get("kernel"))
+        .and_then(|k| k.get("body"))
+        .and_then(|b| b.get("mutatorSetAccumulator"))
+        .and_then(|msa| msa.get("aocl"));
+    eprintln!("[SEND] AOCL JSON keys: {:?}",
+        aocl_json.and_then(|a| a.as_object()).map(|o| o.keys().collect::<Vec<_>>()));
     eprintln!("[SEND] Previous block AOCL leaf count: {}", prev_aocl_leafs);
 
     // Get the transaction kernel for our block to find our output's position
