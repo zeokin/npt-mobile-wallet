@@ -30,6 +30,13 @@ export default function WalletScreen() {
     return () => clearInterval(interval);
   }, [connected]);
 
+  // Auto-show sync prompt on first load if no UTXOs loaded yet
+  useEffect(() => {
+    if (connected && balance === "0" && !syncing && !showPinPrompt) {
+      setShowPinPrompt(true);
+    }
+  }, [connected]);
+
   const handleSync = () => {
     if (!connected) {
       toast.error("Connect to a supporter first");
