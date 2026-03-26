@@ -6,8 +6,8 @@ export default function HistoryScreen() {
   const [tab, setTab] = useState<"in" | "out">("in");
   const { utxos, outgoingTxs } = useWalletStore();
 
-  // Incoming: discovered UTXOs from sync
-  const incoming = utxos.filter((u) => !u.likely_spent);
+  // Incoming: ALL discovered UTXOs (including spent ones for history)
+  const incoming = utxos;
   // Outgoing: locally stored after send
   const outgoing = outgoingTxs;
 
@@ -51,13 +51,24 @@ export default function HistoryScreen() {
           incoming.map((utxo, i) => (
             <div
               key={i}
-              className="p-3 rounded-lg bg-[var(--npt-card)] border border-[var(--npt-border)] flex justify-between items-center"
+              className={`p-3 rounded-lg border flex justify-between items-center ${
+                utxo.likely_spent
+                  ? "bg-[var(--npt-card)]/50 border-[var(--npt-border)]/50 opacity-60"
+                  : "bg-[var(--npt-card)] border-[var(--npt-border)]"
+              }`}
             >
               <div className="text-sm">
                 <p className="text-[var(--npt-muted)]">Block {utxo.block_height}</p>
-                <p className="text-xs text-[var(--npt-muted)]">{utxo.key_type} key #{utxo.key_index}</p>
+                <p className="text-xs text-[var(--npt-muted)]">
+                  {utxo.key_type} key #{utxo.key_index}
+                  {utxo.likely_spent && " (spent)"}
+                </p>
               </div>
-              <span className="font-mono text-sm text-green-400">+{utxo.amount}</span>
+              <span className={`font-mono text-sm ${
+                utxo.likely_spent ? "text-[var(--npt-muted)] line-through" : "text-green-400"
+              }`}>
+                +{utxo.amount}
+              </span>
             </div>
           ))}
 

@@ -3,13 +3,13 @@ import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { invoke } from "@tauri-apps/api/core";
 import { useSettingsStore } from "../store/settings-store";
-import { useWalletStore } from "../store/wallet-store";
+import { useWalletStore, type OutgoingTx } from "../store/wallet-store";
 import NavBar from "../components/ui/NavBar";
 
 export default function SendScreen() {
   const navigate = useNavigate();
   const { connected } = useSettingsStore();
-  const { utxos } = useWalletStore();
+  const { utxos, addOutgoingTx } = useWalletStore();
   const [address, setAddress] = useState("");
   const [amount, setAmount] = useState("");
   const [fee, setFee] = useState("0.001");
@@ -63,6 +63,15 @@ export default function SendScreen() {
         utxoIndices,
       });
 
+      // Store outgoing transaction in local history
+      addOutgoingTx({
+        txid: "local",
+        recipient: address.trim(),
+        amount,
+        fee,
+        timestamp: Date.now(),
+        status: "pending",
+      });
       toast.success("Transaction sent!");
       setStatus("");
       navigate("/wallet", { replace: true });
