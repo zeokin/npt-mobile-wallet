@@ -24,14 +24,15 @@ export default function SendScreen() {
   const feeNum = parseFloat(fee) || 0;
   const totalNeeded = amountNum + feeNum;
 
-  // Subtract pending outgoing from available balance
   const { outgoingTxs } = useWalletStore();
+  const hasPending = outgoingTxs.some((tx) => tx.status === "pending");
   const pendingOutgoing = outgoingTxs
     .filter((tx) => tx.status === "pending")
     .reduce((sum, tx) => sum + (parseFloat(tx.amount) || 0) + (parseFloat(tx.fee) || 0), 0);
   const effectiveBalance = Math.max(0, availableBalance - pendingOutgoing);
 
   const canSend =
+    !hasPending &&
     address.trim().length > 0 &&
     amountNum > 0 &&
     feeNum >= 0 &&
@@ -104,6 +105,13 @@ export default function SendScreen() {
       <div className="flex-1 overflow-y-auto px-4 space-y-4">
         {step === "form" && (
           <>
+            {hasPending && (
+              <div className="p-3 rounded-lg bg-yellow-500/10 border border-yellow-500/30">
+                <p className="text-xs text-yellow-400">
+                  Previous transaction is still pending. Wait for confirmation before sending again.
+                </p>
+              </div>
+            )}
             <div>
               <label className="block text-sm text-[var(--npt-muted)] mb-1">Recipient Address</label>
               <textarea
