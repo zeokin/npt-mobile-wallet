@@ -218,6 +218,8 @@ fn prove_with_limit(
 
     // Step 2: Check complexity (instant)
     let log2_padded_height = aet.padded_height().ilog2() as u8;
+    eprintln!("[PROOF] {} padded_height: 2^{} = {} rows",
+        proof_name, log2_padded_height, aet.padded_height());
     if let Some(max) = max_log2_padded_height {
         if log2_padded_height > max {
             return Err(anyhow!(
