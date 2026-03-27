@@ -265,34 +265,62 @@ async fn send_transaction(
         return Err("No unspent UTXOs found. Sync your wallet first.".to_string());
     }
 
-    // Early balance check — before any expensive operations
-    {
-        use num_traits::{CheckedAdd, Zero};
-        let total_needed = amount_val.checked_add(&fee_val).ok_or("Amount + fee overflow")?;
-        let mut available = neptune_cash::api::export::NativeCurrencyAmount::zero();
-        for u in &unspent_utxos {
-            if let Ok(bytes) = hex::decode(&u.utxo_hex) {
-                if let Ok(utxo) = bincode::deserialize::<neptune_cash::protocol::consensus::transaction::utxo::Utxo>(&bytes) {
-                    available = available + utxo.get_native_currency_amount();
+    // Early balance check + select the best single UTXO that covers the amount
+    use num_traits::{CheckedAdd, Zero};
+    let total_needed = amount_val.checked_add(&fee_val).ok_or("Amount + fee overflow")?;
+
+    // Find the smallest UTXO that covers the total needed (minimize change)
+    let mut best_utxo_idx: Option<usize> = None;
+    let mut best_amount = neptune_cash::api::export::NativeCurrencyAmount::zero();
+    let mut total_available = neptune_cash::api::export::NativeCurrencyAmount::zero();
+
+    for (i, u) in unspent_utxos.iter().enumerate() {
+        if let Ok(bytes) = hex::decode(&u.utxo_hex) {
+            if let Ok(utxo) = bincode::deserialize::<neptune_cash::protocol::consensus::transaction::utxo::Utxo>(&bytes) {
+                let amt = utxo.get_native_currency_amount();
+                total_available = total_available + amt;
+                if amt >= total_needed {
+                    // This UTXO alone covers the amount
+                    if best_utxo_idx.is_none() || amt < best_amount {
+                        best_utxo_idx = Some(i);
+                        best_amount = amt;
+                    }
                 }
             }
         }
-        if available < total_needed {
+    }
+
+    if total_available < total_needed {
+        return Err(format!(
+            "Insufficient balance: have {}, need {} (amount {} + fee {})",
+            total_available, total_needed, amount, fee
+        ));
+    }
+
+    let selected_idx = match best_utxo_idx {
+        Some(idx) => idx,
+        None => {
             return Err(format!(
-                "Insufficient balance: have {}, need {} (amount {} + fee {})",
-                available, total_needed, amount, fee
+                "No single UTXO covers {} + {} = {}. \
+                 You have {} across {} UTXOs. \
+                 Multi-input transactions are not yet supported. \
+                 Try sending a smaller amount.",
+                amount, fee, total_needed, total_available, unspent_utxos.len()
             ));
         }
-        eprintln!("[SEND] Balance check passed: have {}, need {}", available, total_needed);
-    }
-    eprintln!("[SEND] Found {} unspent UTXOs", unspent_utxos.len());
+    };
 
-    // Step 2: Deserialize the first unspent UTXO's data for spending
+    eprintln!("[SEND] Selected UTXO #{} ({}) to cover {}",
+        selected_idx, best_amount, total_needed);
+
+    // Step 2: Deserialize the selected UTXO
     let mut input_utxos = Vec::new();
     let mut input_sender_randomnesses = Vec::new();
     let mut input_receiver_preimages = Vec::new();
 
-    for utxo_data in &unspent_utxos {
+    // Only use the selected UTXO
+    let selected_utxos = vec![&unspent_utxos[selected_idx]];
+    for utxo_data in &selected_utxos {
         let utxo_bytes = hex::decode(&utxo_data.utxo_hex)
             .map_err(|e| format!("Decode UTXO hex: {}", e))?;
         let utxo: neptune_cash::protocol::consensus::transaction::utxo::Utxo =
@@ -341,11 +369,9 @@ async fn send_transaction(
     // Step 4: Get the AOCL leaf index for our UTXO
     // Use neptune-wallet-app's approach: RpcWalletBlock → WalletBlock pattern
     eprintln!("[SEND] Step 4: Computing AOCL leaf index...");
-    // Use the first UNSPENT UTXO, not the first UTXO overall
-    let first_unspent = sync_result.utxos.iter()
-        .find(|u| !u.likely_spent)
-        .ok_or("No unspent UTXOs found after filtering")?;
-    let utxo_block_height = first_unspent.block_height;
+    // Use the SELECTED UTXO
+    let selected_utxo = &unspent_utxos[selected_idx];
+    let utxo_block_height = selected_utxo.block_height;
 
     use neptune_cash::application::json_rpc::core::model::wallet::block::RpcWalletBlock;
     use neptune_cash::protocol::consensus::block::block_kernel::BlockKernel;
@@ -442,7 +468,7 @@ async fn send_transaction(
     use neptune_cash::state::wallet::transaction_output::TxOutput;
     use neptune_cash::protocol::proof_abstractions::timestamp::Timestamp;
     use neptune_cash::protocol::consensus::block::block_height::BlockHeight;
-    use num_traits::{CheckedAdd, CheckedSub, Zero};
+    use num_traits::CheckedSub;
 
     let abs_index_set = AbsoluteIndexSet::compute(
         utxo_hash,
@@ -484,13 +510,13 @@ async fn send_transaction(
 
     // Step 7: Create UnlockedUtxo
     eprintln!("[SEND] Step 7: Creating UnlockedUtxo...");
-    let spending_key = if first_unspent.key_type == "generation" {
+    let spending_key = if selected_utxo.key_type == "generation" {
         neptune_cash::state::wallet::address::SpendingKey::Generation(
-            entropy.nth_generation_spending_key(first_unspent.key_index)
+            entropy.nth_generation_spending_key(selected_utxo.key_index)
         )
     } else {
         neptune_cash::state::wallet::address::SpendingKey::Symmetric(
-            entropy.nth_symmetric_key(first_unspent.key_index)
+            entropy.nth_symmetric_key(selected_utxo.key_index)
         )
     };
     let lock_script_and_witness = spending_key.lock_script_and_witness();
