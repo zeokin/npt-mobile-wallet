@@ -524,6 +524,20 @@ async fn send_transaction(
             }
         }
         eprintln!("[SEND] All {} membership proofs valid", selected.len());
+
+        // Full validation — checks removal records, lock scripts, amounts
+        eprintln!("[SEND] Running full transaction validation...");
+        match tokio::task::spawn_blocking(move || {
+            tokio::runtime::Handle::current().block_on(pw.validate())
+        }).await {
+            Ok(Ok(())) => eprintln!("[SEND] Full validation PASSED"),
+            Ok(Err(e)) => {
+                return Err(format!("Transaction validation FAILED: {:?}", e));
+            }
+            Err(e) => {
+                return Err(format!("Validation task error: {}", e));
+            }
+        }
     }
 
     // Step 10: Generate ProofCollection (THIS IS THE SLOW STEP)
