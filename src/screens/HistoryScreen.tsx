@@ -16,11 +16,13 @@ export default function HistoryScreen() {
   useEffect(() => {
     const checkPending = async () => {
       for (const tx of outgoing) {
+        console.log("[HISTORY] Checking tx:", tx.status, "records:", tx.addition_record_hexes?.length);
         if (tx.status === "pending" && tx.addition_record_hexes?.length > 0) {
           try {
+            console.log("[HISTORY] Calling wasMined with", tx.addition_record_hexes.length, "records");
             const heights = await checkTransactionMined(tx.addition_record_hexes);
+            console.log("[HISTORY] wasMined result:", heights);
             if (heights.length > 0) {
-              // Update status to confirmed
               const store = useWalletStore.getState();
               const updated = store.outgoingTxs.map((t) =>
                 t.timestamp === tx.timestamp
@@ -29,7 +31,9 @@ export default function HistoryScreen() {
               );
               useWalletStore.setState({ outgoingTxs: updated });
             }
-          } catch { /* ignore errors during check */ }
+          } catch (e) {
+            console.error("[HISTORY] wasMined error:", e);
+          }
         }
       }
     };
