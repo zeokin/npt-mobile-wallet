@@ -24,11 +24,18 @@ export default function SendScreen() {
   const feeNum = parseFloat(fee) || 0;
   const totalNeeded = amountNum + feeNum;
 
+  // Subtract pending outgoing from available balance
+  const { outgoingTxs } = useWalletStore();
+  const pendingOutgoing = outgoingTxs
+    .filter((tx) => tx.status === "pending")
+    .reduce((sum, tx) => sum + (parseFloat(tx.amount) || 0) + (parseFloat(tx.fee) || 0), 0);
+  const effectiveBalance = Math.max(0, availableBalance - pendingOutgoing);
+
   const canSend =
     address.trim().length > 0 &&
     amountNum > 0 &&
     feeNum >= 0 &&
-    totalNeeded <= availableBalance &&
+    totalNeeded <= effectiveBalance &&
     connected &&
     unspentUtxos.length > 0 &&
     !loading;
@@ -118,8 +125,14 @@ export default function SendScreen() {
             <div className="p-3 rounded-lg bg-[var(--npt-card)] border border-[var(--npt-border)] space-y-1">
               <div className="flex justify-between text-xs">
                 <span className="text-[var(--npt-muted)]">Available</span>
-                <span>{availableBalance.toFixed(2)} NPT</span>
+                <span>{effectiveBalance.toFixed(2)} NPT</span>
               </div>
+              {pendingOutgoing > 0 && (
+                <div className="flex justify-between text-xs">
+                  <span className="text-[var(--npt-muted)]">Pending outgoing</span>
+                  <span className="text-yellow-400">-{pendingOutgoing.toFixed(2)} NPT</span>
+                </div>
+              )}
               {amountNum > 0 && (
                 <div className="flex justify-between text-xs">
                   <span className="text-[var(--npt-muted)]">Total (amount + fee)</span>

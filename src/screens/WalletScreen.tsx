@@ -27,6 +27,12 @@ export default function WalletScreen() {
     .filter((tx) => tx.status === "pending")
     .reduce((sum, tx) => sum + (parseFloat(tx.amount) || 0) + (parseFloat(tx.fee) || 0), 0);
 
+  // Load outgoing history from app data (survives localStorage clear)
+  useEffect(() => {
+    const store = useWalletStore.getState() as any;
+    if (store.loadOutgoingFromAppData) store.loadOutgoingFromAppData();
+  }, []);
+
   // Auto-connect if not connected
   useEffect(() => {
     if (!connected) {

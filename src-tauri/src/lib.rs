@@ -8,7 +8,7 @@ use rpc::RpcClient;
 use serde::Serialize;
 use std::sync::Mutex;
 use std::time::Instant;
-use tauri::State;
+use tauri::{Manager, State};
 
 /// Session auto-lock after 5 minutes of inactivity.
 const SESSION_TIMEOUT_SECS: u64 = 300;
@@ -580,6 +580,32 @@ async fn send_transaction(
     Ok(serde_json::to_string(&result).unwrap_or_else(|_| "Transaction sent!".to_string()))
 }
 
+/// Save outgoing transaction history to app data directory.
+/// This survives localStorage clear (unlike zustand persist).
+#[tauri::command]
+fn save_outgoing_history(app: tauri::AppHandle, history_json: String) -> Result<(), String> {
+    let dir = app.path().app_data_dir()
+        .map_err(|e| format!("App data dir: {}", e))?;
+    std::fs::create_dir_all(&dir).map_err(|e| format!("Create dir: {}", e))?;
+    let path = dir.join("outgoing_history.json");
+    std::fs::write(&path, &history_json)
+        .map_err(|e| format!("Write history: {}", e))
+}
+
+/// Load outgoing transaction history from app data directory.
+#[tauri::command]
+fn load_outgoing_history(app: tauri::AppHandle) -> Result<String, String> {
+    let dir = app.path().app_data_dir()
+        .map_err(|e| format!("App data dir: {}", e))?;
+    let path = dir.join("outgoing_history.json");
+    if path.exists() {
+        std::fs::read_to_string(&path)
+            .map_err(|e| format!("Read history: {}", e))
+    } else {
+        Ok("[]".to_string())
+    }
+}
+
 /// Check if a transaction's outputs were mined.
 /// Takes addition record hex strings, returns block heights if mined.
 #[tauri::command]
@@ -775,6 +801,8 @@ pub fn run() {
             sync_wallet,
             send_transaction,
             check_transaction_mined,
+            save_outgoing_history,
+            load_outgoing_history,
             // Supporter
             connect_node,
             disconnect_node,

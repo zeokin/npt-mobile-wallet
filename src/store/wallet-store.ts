@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import type { DiscoveredUtxo } from "../api/rpc";
+import { saveOutgoingHistory, loadOutgoingHistory } from "../api/rpc";
 
 interface WalletState {
   balance: string;
@@ -42,7 +43,21 @@ export const useWalletStore = create<WalletState>()(
       setBalance: (balance) => set({ balance }),
       setUtxos: (utxos) => set({ utxos }),
       addOutgoingTx: (tx) =>
-        set((state) => ({ outgoingTxs: [tx, ...state.outgoingTxs] })),
+        set((state) => {
+          const updated = [tx, ...state.outgoingTxs];
+          // Persist to Tauri app data (survives localStorage clear)
+          saveOutgoingHistory(JSON.stringify(updated)).catch(() => {});
+          return { outgoingTxs: updated };
+        }),
+      loadOutgoingFromAppData: async () => {
+        try {
+          const json = await loadOutgoingHistory();
+          const txs = JSON.parse(json);
+          if (Array.isArray(txs) && txs.length > 0) {
+            set({ outgoingTxs: txs });
+          }
+        } catch { /* ignore */ }
+      },
       setLoading: (loading) => set({ loading }),
       setError: (error) => set({ error }),
       setLastSyncHeight: (height) => set({ lastSyncHeight: height }),

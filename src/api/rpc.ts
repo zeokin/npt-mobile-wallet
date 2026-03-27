@@ -46,6 +46,12 @@ export const syncWallet = (pin: string | null, numKeys?: number) =>
 export const checkTransactionMined = (additionRecordHexes: string[]) =>
   invoke<number[]>("check_transaction_mined", { additionRecordHexes });
 
+// Save/load outgoing history to Tauri app data (survives localStorage clear)
+export const saveOutgoingHistory = (historyJson: string) =>
+  invoke<void>("save_outgoing_history", { historyJson });
+export const loadOutgoingHistory = () =>
+  invoke<string>("load_outgoing_history");
+
 // Supporter connection
 export interface ConnectionInfo { network: string; block_height: number; }
 export const connectNode = (url: string, authToken?: string) =>
