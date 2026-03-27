@@ -45,6 +45,8 @@ export default function SendScreen() {
     setStep("confirm");
   };
 
+  const { setSendingStatus } = useWalletStore();
+
   const handleSend = async () => {
     if (!pin) {
       toast.error("Enter your password to confirm");
@@ -52,7 +54,8 @@ export default function SendScreen() {
     }
     setStep("form");
     setLoading(true);
-    setStatus("Building transaction locally...");
+    setStatus("Building transaction...");
+    setSendingStatus("Generating proof — this may take several minutes. Don't close the app.");
 
     try {
       const resultStr = await invoke<string>("send_transaction", {
@@ -78,10 +81,12 @@ export default function SendScreen() {
         status: "pending",
         addition_record_hexes: additionRecordHexes,
       });
+      setSendingStatus(null);
       toast.success("Transaction sent!");
       setStatus("");
       navigate("/wallet", { replace: true });
     } catch (e) {
+      setSendingStatus(null);
       const msg = String(e);
       setStatus("");
       toast.error(msg, { duration: 10000 });
