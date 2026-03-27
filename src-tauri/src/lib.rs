@@ -265,87 +265,74 @@ async fn send_transaction(
         return Err("No unspent UTXOs found. Sync your wallet first.".to_string());
     }
 
-    // Early balance check + select the best single UTXO that covers the amount
-    use num_traits::{CheckedAdd, Zero};
+    // Early balance check + select UTXOs to cover amount
+    use num_traits::{CheckedAdd, CheckedSub, Zero};
+    use neptune_cash::util_types::mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
+    use neptune_cash::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
+    use neptune_cash::application::json_rpc::core::model::wallet::mutator_set::RpcMsMembershipSnapshot;
+    use neptune_cash::application::json_rpc::core::model::message::RestoreMembershipProofRequest;
+    use neptune_cash::application::json_rpc::core::model::wallet::block::RpcWalletBlock;
+    use neptune_cash::protocol::consensus::block::block_kernel::BlockKernel;
+    use neptune_cash::prelude::twenty_first::util_types::mmr::mmr_trait::Mmr;
+    use neptune_cash::prelude::triton_vm::prelude::Tip5;
+    use neptune_cash::protocol::proof_abstractions::mast_hash::MastHash;
+    use neptune_cash::api::export::UnlockedUtxo;
+    use neptune_cash::state::wallet::transaction_output::TxOutput;
+    use neptune_cash::protocol::proof_abstractions::timestamp::Timestamp;
+    use neptune_cash::protocol::consensus::block::block_height::BlockHeight;
+
     let total_needed = amount_val.checked_add(&fee_val).ok_or("Amount + fee overflow")?;
 
-    // Find the smallest UTXO that covers the total needed (minimize change)
-    let mut best_utxo_idx: Option<usize> = None;
-    let mut best_amount = neptune_cash::api::export::NativeCurrencyAmount::zero();
-    let mut total_available = neptune_cash::api::export::NativeCurrencyAmount::zero();
+    // Step 2: Select UTXOs to cover amount (smallest-first strategy)
+    eprintln!("[SEND] Step 2: Selecting UTXOs...");
 
-    for (i, u) in unspent_utxos.iter().enumerate() {
-        if let Ok(bytes) = hex::decode(&u.utxo_hex) {
-            if let Ok(utxo) = bincode::deserialize::<neptune_cash::protocol::consensus::transaction::utxo::Utxo>(&bytes) {
-                let amt = utxo.get_native_currency_amount();
-                total_available = total_available + amt;
-                if amt >= total_needed {
-                    // This UTXO alone covers the amount
-                    if best_utxo_idx.is_none() || amt < best_amount {
-                        best_utxo_idx = Some(i);
-                        best_amount = amt;
-                    }
-                }
-            }
+    // Deserialize all unspent UTXOs with their amounts
+    struct UtxoInput {
+        utxo: neptune_cash::protocol::consensus::transaction::utxo::Utxo,
+        sender_randomness: neptune_cash::prelude::triton_vm::prelude::Digest,
+        receiver_preimage: neptune_cash::prelude::triton_vm::prelude::Digest,
+        amount: neptune_cash::api::export::NativeCurrencyAmount,
+        data: sync::DiscoveredUtxo,
+    }
+
+    let mut all_inputs: Vec<UtxoInput> = Vec::new();
+    for u in &unspent_utxos {
+        let utxo_bytes = hex::decode(&u.utxo_hex).map_err(|e| format!("Decode: {}", e))?;
+        let utxo: neptune_cash::protocol::consensus::transaction::utxo::Utxo =
+            bincode::deserialize(&utxo_bytes).map_err(|e| format!("Deserialize: {}", e))?;
+        let sr_bytes = hex::decode(&u.sender_randomness_hex).map_err(|e| format!("Decode SR: {}", e))?;
+        let sr = bincode::deserialize(&sr_bytes).map_err(|e| format!("Deserialize SR: {}", e))?;
+        let rp_bytes = hex::decode(&u.receiver_preimage_hex).map_err(|e| format!("Decode RP: {}", e))?;
+        let rp = bincode::deserialize(&rp_bytes).map_err(|e| format!("Deserialize RP: {}", e))?;
+        let amount = utxo.get_native_currency_amount();
+        all_inputs.push(UtxoInput { utxo, sender_randomness: sr, receiver_preimage: rp, amount, data: (*u).clone() });
+    }
+
+    // Sort by amount (largest first — minimizes number of inputs needed)
+    all_inputs.sort_by(|a, b| b.amount.partial_cmp(&a.amount).unwrap_or(std::cmp::Ordering::Equal));
+
+    // Select UTXOs until we cover the needed amount
+    let mut selected: Vec<UtxoInput> = Vec::new();
+    let mut accumulated = neptune_cash::api::export::NativeCurrencyAmount::zero();
+    for input in all_inputs {
+        accumulated = accumulated + input.amount;
+        selected.push(input);
+        if accumulated >= total_needed {
+            break;
         }
     }
 
-    if total_available < total_needed {
+    if accumulated < total_needed {
         return Err(format!(
             "Insufficient balance: have {}, need {} (amount {} + fee {})",
-            total_available, total_needed, amount, fee
+            accumulated, total_needed, amount, fee
         ));
     }
 
-    let selected_idx = match best_utxo_idx {
-        Some(idx) => idx,
-        None => {
-            return Err(format!(
-                "No single UTXO covers {} + {} = {}. \
-                 You have {} across {} UTXOs. \
-                 Multi-input transactions are not yet supported. \
-                 Try sending a smaller amount.",
-                amount, fee, total_needed, total_available, unspent_utxos.len()
-            ));
-        }
-    };
+    eprintln!("[SEND] Selected {} UTXOs totaling {} to cover {}",
+        selected.len(), accumulated, total_needed);
 
-    eprintln!("[SEND] Selected UTXO #{} ({}) to cover {}",
-        selected_idx, best_amount, total_needed);
-
-    // Step 2: Deserialize the selected UTXO
-    let mut input_utxos = Vec::new();
-    let mut input_sender_randomnesses = Vec::new();
-    let mut input_receiver_preimages = Vec::new();
-
-    // Only use the selected UTXO
-    let selected_utxos = vec![&unspent_utxos[selected_idx]];
-    for utxo_data in &selected_utxos {
-        let utxo_bytes = hex::decode(&utxo_data.utxo_hex)
-            .map_err(|e| format!("Decode UTXO hex: {}", e))?;
-        let utxo: neptune_cash::protocol::consensus::transaction::utxo::Utxo =
-            bincode::deserialize(&utxo_bytes)
-                .map_err(|e| format!("Deserialize UTXO: {}", e))?;
-
-        let sr_bytes = hex::decode(&utxo_data.sender_randomness_hex)
-            .map_err(|e| format!("Decode sender_randomness: {}", e))?;
-        let sender_randomness: neptune_cash::prelude::triton_vm::prelude::Digest =
-            bincode::deserialize(&sr_bytes)
-                .map_err(|e| format!("Deserialize sender_randomness: {}", e))?;
-
-        let rp_bytes = hex::decode(&utxo_data.receiver_preimage_hex)
-            .map_err(|e| format!("Decode receiver_preimage: {}", e))?;
-        let receiver_preimage: neptune_cash::prelude::triton_vm::prelude::Digest =
-            bincode::deserialize(&rp_bytes)
-                .map_err(|e| format!("Deserialize receiver_preimage: {}", e))?;
-
-        input_utxos.push(utxo);
-        input_sender_randomnesses.push(sender_randomness);
-        input_receiver_preimages.push(receiver_preimage);
-    }
-    eprintln!("[SEND] Step 2: Deserialized {} input UTXOs", input_utxos.len());
-
-    // Step 3: Get chain tip for mutator set accumulator
+    // Step 3: Get chain tip
     eprintln!("[SEND] Step 3: Getting chain tip...");
     let tip_json = rpc.get_tip().await?;
     let tip_height = tip_json
@@ -357,27 +344,7 @@ async fn send_transaction(
         .ok_or("Cannot parse tip height")?;
     eprintln!("[SEND] Chain tip at height {}", tip_height);
 
-    // Step 4: Build TransactionDetails
-    // This requires membership proofs, which we need to get from the supporter.
-    // For now, return progress info — the full pipeline needs:
-    // - Compute AbsoluteIndexSet for each input UTXO (needs aocl_leaf_index)
-    // - Call wallet_restoreMembershipProof
-    // - Build TransactionDetails::new_without_coinbase()
-    // - Generate ProofCollection (takes minutes)
-    // - Submit transaction
-
-    // Step 4: Get the AOCL leaf index for our UTXO
-    // Use neptune-wallet-app's approach: RpcWalletBlock → WalletBlock pattern
-    eprintln!("[SEND] Step 4: Computing AOCL leaf index...");
-    // Use the SELECTED UTXO
-    let selected_utxo = &unspent_utxos[selected_idx];
-    let utxo_block_height = selected_utxo.block_height;
-
-    use neptune_cash::application::json_rpc::core::model::wallet::block::RpcWalletBlock;
-    use neptune_cash::protocol::consensus::block::block_kernel::BlockKernel;
-    use neptune_cash::prelude::twenty_first::util_types::mmr::mmr_trait::Mmr;
-
-    // Helper: parse wallet blocks from RPC response
+    // Helper: parse wallet blocks
     fn parse_wallet_blocks(json: &serde_json::Value) -> Result<Vec<(BlockKernel, neptune_cash::prelude::triton_vm::prelude::Digest)>, String> {
         let blocks_json = json.get("blocks").cloned().unwrap_or(json.clone());
         let rpc_blocks: Vec<RpcWalletBlock> = serde_json::from_value(blocks_json)
@@ -389,143 +356,100 @@ async fn send_transaction(
         }).collect())
     }
 
-    // Get previous block via wallet_getBlocks (returns RpcWalletBlock with proof_leaf)
-    let prev_blocks_json = rpc.get_wallet_blocks(utxo_block_height - 1, utxo_block_height - 1).await?;
-    let prev_blocks = parse_wallet_blocks(&prev_blocks_json)?;
-    let (prev_kernel, prev_hash) = prev_blocks.into_iter().next()
-        .ok_or("No previous block returned")?;
-    let prev_guesser_fees = prev_kernel.guesser_fee_addition_records(prev_hash)
-        .map_err(|e| format!("Get guesser fees from prev block: {}", e))?;
-    let prev_msa = prev_kernel.body.mutator_set_accumulator_after(prev_guesser_fees);
-    let prev_aocl_leafs = prev_msa.aocl.num_leafs();
+    // Step 4-7: For EACH selected UTXO: compute AOCL index, get membership proof, unlock
+    eprintln!("[SEND] Steps 4-7: Processing {} inputs...", selected.len());
+    let mut all_abs_index_sets = Vec::new();
+    let mut all_aocl_indices = Vec::new();
 
-    eprintln!("[SEND] Previous block AOCL leaf count (with guesser fees): {}", prev_aocl_leafs);
+    // Compute AOCL index and AbsoluteIndexSet for each input
+    for (idx, input) in selected.iter().enumerate() {
+        let block_height = input.data.block_height;
+        eprintln!("[SEND] Input {}: block {}, amount {}", idx, block_height, input.amount);
 
-    // Get the FULL block (typed) to find our output's position
-    use neptune_cash::prelude::triton_vm::prelude::Tip5;
-    use neptune_cash::protocol::proof_abstractions::mast_hash::MastHash;
+        // Get previous block AOCL count
+        let prev_json = rpc.get_wallet_blocks(block_height - 1, block_height - 1).await?;
+        let prev_blocks = parse_wallet_blocks(&prev_json)?;
+        let (prev_kernel, prev_hash) = prev_blocks.into_iter().next().ok_or("No prev block")?;
+        let prev_gf = prev_kernel.guesser_fee_addition_records(prev_hash)
+            .map_err(|e| format!("Guesser fees: {}", e))?;
+        let prev_msa = prev_kernel.body.mutator_set_accumulator_after(prev_gf);
+        let prev_aocl = prev_msa.aocl.num_leafs();
 
-    let our_blocks_json = rpc.get_wallet_blocks(utxo_block_height, utxo_block_height).await?;
-    let our_blocks = parse_wallet_blocks(&our_blocks_json)?;
-    let (our_kernel, our_hash) = our_blocks.into_iter().next()
-        .ok_or("No block returned for UTXO height")?;
+        // Get block additions
+        let block_json = rpc.get_wallet_blocks(block_height, block_height).await?;
+        let blocks = parse_wallet_blocks(&block_json)?;
+        let (kernel, hash) = blocks.into_iter().next().ok_or("No block")?;
+        let all_additions = kernel.all_addition_records(hash)
+            .map_err(|e| format!("Addition records: {}", e))?;
 
-    // Get ALL addition records (tx outputs + guesser fees) — same order as AOCL
-    let all_additions = our_kernel.all_addition_records(our_hash)
-        .map_err(|e| format!("Get addition records: {}", e))?;
+        // Find our commitment
+        let utxo_hash = Tip5::hash(&input.utxo);
+        let receiver_digest = input.receiver_preimage.hash();
+        let commitment = neptune_cash::util_types::mutator_set::commit(
+            utxo_hash, input.sender_randomness, receiver_digest,
+        );
 
-    // Compute our expected commitment
-    let utxo_hash = Tip5::hash(&input_utxos[0]);
-    let receiver_digest = input_receiver_preimages[0].hash();
-    let expected_commitment = neptune_cash::util_types::mutator_set::commit(
-        utxo_hash,
-        input_sender_randomnesses[0],
-        receiver_digest,
-    );
+        let position = all_additions.iter().position(|a|
+            a.canonical_commitment == commitment.canonical_commitment
+        ).ok_or(format!("UTXO not found in block {} additions", block_height))?;
 
-    eprintln!("[SEND] Block has {} total additions (tx + guesser fees)", all_additions.len());
-    eprintln!("[SEND] Expected commitment: {:?}", expected_commitment.canonical_commitment);
+        let aocl_idx = prev_aocl + position as u64;
+        eprintln!("[SEND] Input {}: AOCL index {} (prev {} + pos {})", idx, aocl_idx, prev_aocl, position);
 
-    // Find our output position in ALL additions (typed comparison — no hex guessing)
-    let mut our_output_index: Option<usize> = None;
-    for (i, addition) in all_additions.iter().enumerate() {
-        if addition.canonical_commitment == expected_commitment.canonical_commitment {
-            our_output_index = Some(i);
-            eprintln!("[SEND] MATCH at addition index {} !", i);
-            break;
-        }
+        let abs_set = AbsoluteIndexSet::compute(
+            utxo_hash, input.sender_randomness, input.receiver_preimage, aocl_idx,
+        );
+        all_abs_index_sets.push(abs_set);
+        all_aocl_indices.push(aocl_idx);
     }
 
-    let aocl_leaf_index = match our_output_index {
-        Some(idx) => {
-            let index = prev_aocl_leafs + idx as u64;
-            eprintln!("[SEND] AOCL leaf index: {} (prev {} + position {})", index, prev_aocl_leafs, idx);
-            index
-        }
-        None => {
-            // Dump all commitments for debugging
-            for (i, addition) in all_additions.iter().enumerate() {
-                eprintln!("[SEND] Addition {}: {:?}", i, addition.canonical_commitment);
-            }
-            return Err(format!(
-                "Could not find our UTXO in block {} additions ({} total). \
-                 Expected: {:?}",
-                utxo_block_height, all_additions.len(),
-                expected_commitment.canonical_commitment
-            ));
-        }
-    };
-
-    eprintln!("[SEND] AOCL leaf index: {}", aocl_leaf_index);
-
-    // Step 5: Compute AbsoluteIndexSet
-    eprintln!("[SEND] Step 5: Computing AbsoluteIndexSet...");
-    use neptune_cash::util_types::mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
-    use neptune_cash::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
-    use neptune_cash::application::json_rpc::core::model::wallet::mutator_set::RpcMsMembershipSnapshot;
-    use neptune_cash::application::json_rpc::core::model::message::RestoreMembershipProofRequest;
-    use neptune_cash::api::export::UnlockedUtxo;
-    use neptune_cash::state::wallet::transaction_output::TxOutput;
-    use neptune_cash::protocol::proof_abstractions::timestamp::Timestamp;
-    use neptune_cash::protocol::consensus::block::block_height::BlockHeight;
-    use num_traits::CheckedSub;
-
-    let abs_index_set = AbsoluteIndexSet::compute(
-        utxo_hash,
-        input_sender_randomnesses[0],
-        input_receiver_preimages[0],
-        aocl_leaf_index,
-    );
-    eprintln!("[SEND] AbsoluteIndexSet computed");
-
-    // Step 6: Restore membership proof from supporter
-    eprintln!("[SEND] Step 6: Restoring membership proof...");
+    // Batch restore membership proofs for ALL inputs
+    eprintln!("[SEND] Step 6: Restoring {} membership proofs...", all_abs_index_sets.len());
     let restore_request = RestoreMembershipProofRequest {
-        absolute_index_sets: vec![abs_index_set],
+        absolute_index_sets: all_abs_index_sets,
     };
     let restore_params = serde_json::to_value(&restore_request)
-        .map_err(|e| format!("Serialize restore request: {}", e))?;
+        .map_err(|e| format!("Serialize: {}", e))?;
     let proof_response_json = rpc.restore_membership_proof(&restore_params).await?;
 
-    // Parse the response
     let snapshot_json = proof_response_json.get("snapshot")
-        .cloned()
-        .unwrap_or(proof_response_json.clone());
+        .cloned().unwrap_or(proof_response_json.clone());
     let snapshot: RpcMsMembershipSnapshot = serde_json::from_value(snapshot_json)
-        .map_err(|e| format!("Parse membership snapshot: {}", e))?;
-
-    let privacy_proof = snapshot.membership_proofs.into_iter().next()
-        .ok_or("No membership proof in response")?;
-
-    let membership_proof = privacy_proof
-        .extract_ms_membership_proof(
-            aocl_leaf_index,
-            input_sender_randomnesses[0],
-            input_receiver_preimages[0],
-        )
-        .ok_or("Failed to extract membership proof — AOCL index may be wrong")?;
-
+        .map_err(|e| format!("Parse snapshot: {}", e))?;
     let tip_msa: MutatorSetAccumulator = snapshot.synced_mutator_set.into();
-    eprintln!("[SEND] Membership proof extracted");
 
-    // Step 7: Create UnlockedUtxo
-    eprintln!("[SEND] Step 7: Creating UnlockedUtxo...");
-    let spending_key = if selected_utxo.key_type == "generation" {
-        neptune_cash::state::wallet::address::SpendingKey::Generation(
-            entropy.nth_generation_spending_key(selected_utxo.key_index)
-        )
-    } else {
-        neptune_cash::state::wallet::address::SpendingKey::Symmetric(
-            entropy.nth_symmetric_key(selected_utxo.key_index)
-        )
-    };
-    let lock_script_and_witness = spending_key.lock_script_and_witness();
-    let unlocked = UnlockedUtxo::unlock(
-        input_utxos[0].clone(),
-        lock_script_and_witness,
-        membership_proof,
-    );
-    eprintln!("[SEND] UnlockedUtxo created");
+    // Create UnlockedUtxo for each input
+    eprintln!("[SEND] Step 7: Creating {} UnlockedUtxos...", selected.len());
+    let mut unlocked_utxos = Vec::new();
+    for (idx, (input, proof_data)) in selected.iter()
+        .zip(snapshot.membership_proofs.into_iter())
+        .enumerate()
+    {
+        let membership_proof = proof_data
+            .extract_ms_membership_proof(
+                all_aocl_indices[idx],
+                input.sender_randomness,
+                input.receiver_preimage,
+            )
+            .ok_or(format!("Extract proof failed for input {}", idx))?;
+
+        let spending_key = if input.data.key_type == "generation" {
+            neptune_cash::state::wallet::address::SpendingKey::Generation(
+                entropy.nth_generation_spending_key(input.data.key_index)
+            )
+        } else {
+            neptune_cash::state::wallet::address::SpendingKey::Symmetric(
+                entropy.nth_symmetric_key(input.data.key_index)
+            )
+        };
+
+        unlocked_utxos.push(UnlockedUtxo::unlock(
+            input.utxo.clone(),
+            spending_key.lock_script_and_witness(),
+            membership_proof,
+        ));
+    }
+    eprintln!("[SEND] {} UnlockedUtxos created", unlocked_utxos.len());
 
     // Step 8: Build outputs
     eprintln!("[SEND] Step 8: Building outputs...");
@@ -543,16 +467,10 @@ async fn send_transaction(
         amount_val, recipient_sender_randomness, recipient, false,
     );
 
-    let input_total = input_utxos[0].get_native_currency_amount();
-    let spend_total = amount_val.checked_add(&fee_val).ok_or("Amount + fee overflow")?;
-    if input_total < spend_total {
-        return Err(format!("Insufficient balance: have {}, need {}", input_total, spend_total));
-    }
-
     let mut tx_outputs = neptune_cash::state::wallet::transaction_output::TxOutputList::from(
         vec![recipient_output]
     );
-    if let Some(change_amount) = input_total.checked_sub(&spend_total) {
+    if let Some(change_amount) = accumulated.checked_sub(&total_needed) {
         if change_amount > neptune_cash::api::export::NativeCurrencyAmount::zero() {
             let change_privacy_digest = change_address.privacy_digest();
             let change_sender_randomness = entropy.generate_sender_randomness(
@@ -570,33 +488,32 @@ async fn send_transaction(
     eprintln!("[SEND] Step 9: Building TransactionDetails...");
     let timestamp = Timestamp::now();
     let transaction_details = neptune_cash::api::export::TransactionDetails::new_without_coinbase(
-        vec![unlocked], tx_outputs, fee_val, timestamp, tip_msa, network,
+        unlocked_utxos, tx_outputs, fee_val, timestamp, tip_msa, network,
     );
-    eprintln!("[SEND] TransactionDetails built");
+    eprintln!("[SEND] TransactionDetails built ({} inputs)", selected.len());
 
     // Step 9.5: Validate membership proof before expensive proof generation
     eprintln!("[SEND] Step 9.5: Validating membership proof...");
     {
-        use neptune_cash::prelude::twenty_first::util_types::mmr::mmr_trait::Mmr;
-
-        let item = Tip5::hash(&input_utxos[0]);
         let msa = &transaction_details.mutator_set_accumulator;
         let pw = transaction_details.primitive_witness();
-        let is_valid = msa.verify(item, &pw.input_membership_proofs[0]);
 
-        eprintln!("[SEND] Membership proof valid: {}", is_valid);
-        eprintln!("[SEND] MSA AOCL leafs: {}", msa.aocl.num_leafs());
-        eprintln!("[SEND] Kernel MSA hash: {:?}", transaction_details.transaction_kernel().mutator_set_hash);
-        eprintln!("[SEND] MSA hash: {:?}", msa.hash());
-
-        if !is_valid {
-            return Err(format!(
-                "Membership proof validation failed. \
-                 AOCL index: {}, MSA AOCL leafs: {}. \
-                 The proof from the supporter may be stale or incorrect.",
-                aocl_leaf_index, msa.aocl.num_leafs()
-            ));
+        for (idx, (input, proof)) in selected.iter()
+            .zip(pw.input_membership_proofs.iter())
+            .enumerate()
+        {
+            let item = Tip5::hash(&input.utxo);
+            let is_valid = msa.verify(item, proof);
+            eprintln!("[SEND] Input {} membership proof valid: {}", idx, is_valid);
+            if !is_valid {
+                return Err(format!(
+                    "Membership proof validation failed for input {}. \
+                     AOCL index: {}, MSA AOCL leafs: {}.",
+                    idx, all_aocl_indices[idx], msa.aocl.num_leafs()
+                ));
+            }
         }
+        eprintln!("[SEND] All {} membership proofs valid", selected.len());
     }
 
     // Step 10: Generate ProofCollection (THIS IS THE SLOW STEP)
