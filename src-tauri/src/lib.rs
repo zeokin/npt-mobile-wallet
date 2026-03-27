@@ -595,11 +595,14 @@ async fn send_transaction(
     eprintln!("[SEND] Submitted! Response: {}", submit_result);
 
     // Return addition record hexes for tracking confirmation via wasMined
+    // Store the full AdditionRecord (not just the commitment) for wasMined lookup
     let kernel = transaction_details.transaction_kernel();
     let addition_hexes: Vec<String> = kernel.outputs.iter()
-        .map(|ar| hex::encode(bincode::serialize(&ar.canonical_commitment).unwrap_or_default()))
+        .map(|ar| hex::encode(bincode::serialize(ar).unwrap_or_default()))
         .collect();
-    eprintln!("[SEND] Output addition records: {:?}", addition_hexes);
+    eprintln!("[SEND] Output addition records ({} outputs): {:?}",
+        addition_hexes.len(),
+        addition_hexes.iter().map(|h| &h[..20.min(h.len())]).collect::<Vec<_>>());
 
     let result = serde_json::json!({
         "success": true,
@@ -620,15 +623,17 @@ async fn check_transaction_mined(
 
     use neptune_cash::application::json_rpc::core::model::message::WasMinedRequest;
     use neptune_cash::application::json_rpc::core::model::block::transaction_kernel::RpcAdditionRecord;
+    use neptune_cash::util_types::mutator_set::addition_record::AdditionRecord;
 
-    // Deserialize addition records from hex
+    // Deserialize full AdditionRecords from hex
     let mut addition_records = Vec::new();
     for hex_str in &addition_record_hexes {
         let bytes = hex::decode(hex_str).map_err(|e| format!("Decode hex: {}", e))?;
-        let commitment: neptune_cash::prelude::triton_vm::prelude::Digest =
-            bincode::deserialize(&bytes).map_err(|e| format!("Deserialize: {}", e))?;
-        addition_records.push(RpcAdditionRecord(commitment));
+        let ar: AdditionRecord = bincode::deserialize(&bytes)
+            .map_err(|e| format!("Deserialize AdditionRecord: {}", e))?;
+        addition_records.push(RpcAdditionRecord::from(ar));
     }
+    eprintln!("[CHECK_MINED] Checking {} addition records", addition_records.len());
 
     let request = WasMinedRequest {
         absolute_index_sets: vec![], // we're checking outputs, not inputs
@@ -638,6 +643,7 @@ async fn check_transaction_mined(
         .map_err(|e| format!("Serialize: {}", e))?;
 
     let result = rpc.was_mined(&params).await?;
+    eprintln!("[CHECK_MINED] Response: {}", serde_json::to_string(&result).unwrap_or_default());
 
     let heights = result.get("blockHeights")
         .or_else(|| result.get("block_heights"))
@@ -645,6 +651,7 @@ async fn check_transaction_mined(
         .map(|arr| arr.iter().filter_map(|v| v.as_u64()).collect())
         .unwrap_or_default();
 
+    eprintln!("[CHECK_MINED] Block heights: {:?}", heights);
     Ok(heights)
 }
 
