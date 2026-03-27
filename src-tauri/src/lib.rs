@@ -594,19 +594,21 @@ async fn send_transaction(
     let submit_result = rpc.submit_transaction(&submit_params).await?;
     eprintln!("[SEND] Submitted! Response: {}", submit_result);
 
-    // Return addition record hexes for tracking confirmation via wasMined
-    // Store the full AdditionRecord (not just the commitment) for wasMined lookup
+    // Return addition records as JSON for tracking confirmation via wasMined
+    use neptune_cash::application::json_rpc::core::model::block::transaction_kernel::RpcAdditionRecord;
     let kernel = transaction_details.transaction_kernel();
-    let addition_hexes: Vec<String> = kernel.outputs.iter()
-        .map(|ar| hex::encode(bincode::serialize(ar).unwrap_or_default()))
+    let addition_jsons: Vec<String> = kernel.outputs.iter()
+        .map(|ar| {
+            let rpc_ar = RpcAdditionRecord::from(*ar);
+            serde_json::to_string(&rpc_ar).unwrap_or_default()
+        })
         .collect();
     eprintln!("[SEND] Output addition records ({} outputs): {:?}",
-        addition_hexes.len(),
-        addition_hexes.iter().map(|h| &h[..20.min(h.len())]).collect::<Vec<_>>());
+        addition_jsons.len(), addition_jsons);
 
     let result = serde_json::json!({
         "success": true,
-        "addition_record_hexes": addition_hexes,
+        "addition_record_hexes": addition_jsons,
     });
     Ok(serde_json::to_string(&result).unwrap_or_else(|_| "Transaction sent!".to_string()))
 }
@@ -623,15 +625,13 @@ async fn check_transaction_mined(
 
     use neptune_cash::application::json_rpc::core::model::message::WasMinedRequest;
     use neptune_cash::application::json_rpc::core::model::block::transaction_kernel::RpcAdditionRecord;
-    use neptune_cash::util_types::mutator_set::addition_record::AdditionRecord;
 
-    // Deserialize full AdditionRecords from hex
+    // Deserialize RpcAdditionRecords from JSON strings
     let mut addition_records = Vec::new();
-    for hex_str in &addition_record_hexes {
-        let bytes = hex::decode(hex_str).map_err(|e| format!("Decode hex: {}", e))?;
-        let ar: AdditionRecord = bincode::deserialize(&bytes)
-            .map_err(|e| format!("Deserialize AdditionRecord: {}", e))?;
-        addition_records.push(RpcAdditionRecord::from(ar));
+    for json_str in &addition_record_hexes {
+        let ar: RpcAdditionRecord = serde_json::from_str(json_str)
+            .map_err(|e| format!("Deserialize RpcAdditionRecord: {} from '{}'", e, json_str))?;
+        addition_records.push(ar);
     }
     eprintln!("[CHECK_MINED] Checking {} addition records", addition_records.len());
 
