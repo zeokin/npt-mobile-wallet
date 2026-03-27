@@ -322,6 +322,16 @@ async fn send_transaction(
         }
     }
 
+    // Check input count — too many inputs means proof generation exceeds block time
+    const MAX_INPUTS: usize = 10;
+    if selected.len() > MAX_INPUTS {
+        return Err(format!(
+            "Transaction needs {} UTXOs but maximum is {} to keep proof generation \
+             under the block time (~10 minutes). Please send a smaller amount.",
+            selected.len(), MAX_INPUTS
+        ));
+    }
+
     if accumulated < total_needed {
         return Err(format!(
             "Insufficient balance: have {}, need {} (amount {} + fee {})",

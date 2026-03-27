@@ -34,10 +34,10 @@ use neptune_cash::api::export::TransactionDetails;
 use neptune_cash::prelude::tasm_lib;
 
 /// Maximum log2 padded height for proof generation.
-/// 2^25 = 33,554,432 rows — allows up to ~20 inputs.
-/// Higher values use more RAM and take longer.
-/// Desktop: 2^25 is safe (minutes). Mobile: may need lower.
-const MAX_LOG2_PADDED_HEIGHT: u8 = 25;
+/// Must complete within ~9 minutes (before next block invalidates proofs).
+/// Testing results: 2^23 takes ~3 min on desktop.
+/// 2^24 would take ~6-8 min. 2^25 would risk exceeding block time.
+const MAX_LOG2_PADDED_HEIGHT: u8 = 24;
 
 /// Result of a send operation.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -224,8 +224,10 @@ fn prove_with_limit(
     if let Some(max) = max_log2_padded_height {
         if log2_padded_height > max {
             return Err(anyhow!(
-                "{} proof too complex for mobile: 2^{} rows exceeds limit 2^{}. \
-                 Try a simpler transaction or use a desktop wallet.",
+                "Transaction too complex — proof generation would take longer than \
+                 the block time (~10 minutes), which would invalidate the transaction. \
+                 Please send a smaller amount to use fewer UTXOs. \
+                 (Proof '{}': 2^{} rows exceeds limit 2^{})",
                 proof_name,
                 log2_padded_height,
                 max
