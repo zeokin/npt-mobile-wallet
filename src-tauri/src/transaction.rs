@@ -33,10 +33,11 @@ use tasm_lib::triton_vm::proof::Claim;
 use neptune_cash::api::export::TransactionDetails;
 use neptune_cash::prelude::tasm_lib;
 
-/// Maximum log2 padded height for mobile proof generation.
-/// 2^23 = 8,388,608 rows — matches XNT's limit.
-/// Proofs exceeding this would likely OOM or take too long on mobile.
-const MAX_LOG2_PADDED_HEIGHT: u8 = 23;
+/// Maximum log2 padded height for proof generation.
+/// 2^25 = 33,554,432 rows — allows up to ~20 inputs.
+/// Higher values use more RAM and take longer.
+/// Desktop: 2^25 is safe (minutes). Mobile: may need lower.
+const MAX_LOG2_PADDED_HEIGHT: u8 = 25;
 
 /// Result of a send operation.
 #[derive(Clone, Debug, Serialize, Deserialize)]
