@@ -8,6 +8,9 @@
 //! 5. Call archival_areBloomIndicesSet → check if UTXO is spent
 //!
 //! The supporter never learns which addresses belong to us.
+//!
+//! Performance: kernel fetches, wallet block fetches, and bloom filter checks
+//! are all parallelized. Wallet blocks are cached to avoid duplicate fetches.
 
 use neptune_cash::api::export::KeyType;
 use neptune_cash::state::wallet::address::announcement_flag::AnnouncementFlag;
@@ -16,6 +19,7 @@ use neptune_cash::state::wallet::address::SpendingKey;
 use neptune_cash::state::wallet::wallet_entropy::WalletEntropy;
 use serde::{Deserialize, Serialize};
 use neptune_cash::prelude::triton_vm::prelude::BFieldElement;
+use std::collections::{HashMap, HashSet};
 
 use crate::rpc::RpcClient;
 
@@ -89,19 +93,45 @@ pub async fn scan_for_utxos(
         });
     }
 
-    // Step 2: Query supporter for block heights matching our flags
+    // Step 2: Query supporter for block heights matching our flags (1 RPC call)
     let block_heights = rpc.block_heights_by_flags(&flags).await?;
+    eprintln!("[SYNC] Found {} candidate blocks", block_heights.len());
 
-    // Step 3: For each candidate block, get the transaction kernel and scan
+    if block_heights.is_empty() {
+        return Ok(SyncResult {
+            balance: "0".to_string(),
+            utxo_count: 0,
+            blocks_scanned: 0,
+            utxos: vec![],
+        });
+    }
+
+    // Step 3: Fetch ALL block kernels in parallel
+    eprintln!("[SYNC] Fetching {} block kernels in parallel...", block_heights.len());
+    let mut kernel_handles = Vec::new();
+    for &height in &block_heights {
+        let rpc_clone = rpc.clone();
+        kernel_handles.push(tokio::spawn(async move {
+            (height, rpc_clone.get_block_transaction_kernel(height).await)
+        }));
+    }
+
+    // Collect kernel results into ordered map
+    let mut kernels: Vec<(u64, serde_json::Value)> = Vec::new();
+    for handle in kernel_handles {
+        let (height, result) = handle.await
+            .map_err(|e| format!("Kernel fetch task error: {}", e))?;
+        match result? {
+            Some(kernel_json) => kernels.push((height, kernel_json)),
+            None => continue,
+        }
+    }
+    eprintln!("[SYNC] Got {} block kernels", kernels.len());
+
+    // Step 4: Decrypt announcements locally using spending keys
     let mut discovered: Vec<DiscoveredUtxo> = Vec::new();
 
-    for height in &block_heights {
-        let kernel_json = match rpc.get_block_transaction_kernel(*height).await? {
-            Some(k) => k,
-            None => continue,
-        };
-
-        // Extract announcements array from the kernel JSON
+    for (height, kernel_json) in &kernels {
         eprintln!("[DEBUG] kernel JSON keys: {:?}",
             kernel_json.as_object().map(|o| o.keys().collect::<Vec<_>>()));
         let announcements = kernel_json
@@ -111,9 +141,7 @@ pub async fn scan_for_utxos(
             .unwrap_or_default();
         eprintln!("[DEBUG] Found {} announcements in block {}", announcements.len(), height);
 
-        // Step 4: Try decrypting each announcement with each spending key
         for announcement_val in &announcements {
-            // Parse announcement message (array of u64 field elements)
             let msg = match parse_announcement_message(announcement_val) {
                 Some(m) => {
                     eprintln!("[DEBUG] Parsed announcement: {} BFieldElements, first two: {:?}",
@@ -135,20 +163,17 @@ pub async fn scan_for_utxos(
             let ann_receiver_id = msg[1];
             let ciphertext = &msg[2..];
 
-            // Check each key for a receiver_identifier match, then try decrypt
             for (key, key_index, key_type) in &keys {
                 if ann_receiver_id != key.receiver_identifier() {
                     continue;
                 }
 
-                // receiver_id matched — try to decrypt
                 let ciphertext_bfes: Vec<BFieldElement> = ciphertext.to_vec();
                 match key.decrypt(&ciphertext_bfes) {
                     Ok((utxo, sender_randomness)) => {
                         let amount = format_utxo_amount(&utxo);
                         let receiver_preimage = key.privacy_preimage();
 
-                        // Serialize for later spending
                         let utxo_hex = hex::encode(
                             bincode::serialize(&utxo).unwrap_or_default(),
                         );
@@ -168,7 +193,7 @@ pub async fn scan_for_utxos(
                             utxo_hex,
                             sender_randomness_hex: sr_hex,
                             receiver_preimage_hex: rp_hex,
-                            aocl_leaf_index: None, // computed below
+                            aocl_leaf_index: None,
                         });
                     }
                     Err(_) => continue,
@@ -177,76 +202,163 @@ pub async fn scan_for_utxos(
         }
     }
 
-    // Step 6: Compute AOCL indices and check spent status
-    // Group UTXOs by block height to minimize RPC calls
+    eprintln!("[SYNC] Discovered {} UTXOs, computing AOCL indices...", discovered.len());
+
+    if discovered.is_empty() {
+        return Ok(SyncResult {
+            balance: "0".to_string(),
+            utxo_count: 0,
+            blocks_scanned: block_heights.len(),
+            utxos: vec![],
+        });
+    }
+
+    // Step 5: Fetch wallet blocks (cached + parallel)
+    // Collect all unique block heights we need
     use neptune_cash::application::json_rpc::core::model::wallet::block::RpcWalletBlock;
     use neptune_cash::protocol::consensus::block::block_kernel::BlockKernel;
     use neptune_cash::prelude::twenty_first::util_types::mmr::mmr_trait::Mmr;
     use neptune_cash::util_types::mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
+    use neptune_cash::prelude::triton_vm::prelude::Digest;
 
-    for utxo_data in &mut discovered {
-        // Get previous block to compute AOCL leaf count
-        if utxo_data.block_height > 0 {
-            if let Ok(prev_json) = rpc.get_wallet_blocks(utxo_data.block_height - 1, utxo_data.block_height - 1).await {
-                if let Ok(blocks) = serde_json::from_value::<Vec<RpcWalletBlock>>(
-                    prev_json.get("blocks").cloned().unwrap_or(prev_json.clone())
-                ) {
-                    if let Some(prev_rpc) = blocks.into_iter().next() {
-                        let prev_hash = prev_rpc.hash();
-                        let prev_kernel: BlockKernel = prev_rpc.kernel.into();
-                        if let Ok(guesser_fees) = prev_kernel.guesser_fee_addition_records(prev_hash) {
-                            let prev_msa = prev_kernel.body.mutator_set_accumulator_after(guesser_fees);
-                            let prev_aocl = prev_msa.aocl.num_leafs();
+    let mut needed_heights: HashSet<u64> = HashSet::new();
+    for utxo in &discovered {
+        needed_heights.insert(utxo.block_height);
+        if utxo.block_height > 0 {
+            needed_heights.insert(utxo.block_height - 1);
+        }
+    }
 
-                            // Get our block to find output position
-                            if let Ok(our_json) = rpc.get_wallet_blocks(utxo_data.block_height, utxo_data.block_height).await {
-                                if let Ok(our_blocks) = serde_json::from_value::<Vec<RpcWalletBlock>>(
-                                    our_json.get("blocks").cloned().unwrap_or(our_json.clone())
-                                ) {
-                                    if let Some(our_rpc) = our_blocks.into_iter().next() {
-                                        let our_hash = our_rpc.hash();
-                                        let our_kernel: BlockKernel = our_rpc.kernel.into();
-                                        if let Ok(all_additions) = our_kernel.all_addition_records(our_hash) {
-                                            // Deserialize UTXO to compute commitment
-                                            if let Ok(utxo_bytes) = hex::decode(&utxo_data.utxo_hex) {
-                                                if let Ok(utxo) = bincode::deserialize::<neptune_cash::protocol::consensus::transaction::utxo::Utxo>(&utxo_bytes) {
-                                                    if let Ok(sr_bytes) = hex::decode(&utxo_data.sender_randomness_hex) {
-                                                        if let Ok(sr) = bincode::deserialize::<neptune_cash::prelude::triton_vm::prelude::Digest>(&sr_bytes) {
-                                                            if let Ok(rp_bytes) = hex::decode(&utxo_data.receiver_preimage_hex) {
-                                                                if let Ok(rp) = bincode::deserialize::<neptune_cash::prelude::triton_vm::prelude::Digest>(&rp_bytes) {
-                                                                    let item = neptune_cash::prelude::triton_vm::prelude::Tip5::hash(&utxo);
-                                                                    let receiver_digest = rp.hash();
-                                                                    let commitment = neptune_cash::util_types::mutator_set::commit(item, sr, receiver_digest);
+    eprintln!("[SYNC] Fetching {} wallet blocks in parallel (deduplicated)...", needed_heights.len());
+    let mut block_handles = Vec::new();
+    for &h in &needed_heights {
+        let rpc_clone = rpc.clone();
+        block_handles.push(tokio::spawn(async move {
+            (h, rpc_clone.get_wallet_blocks(h, h).await)
+        }));
+    }
 
-                                                                    for (i, addition) in all_additions.iter().enumerate() {
-                                                                        if addition.canonical_commitment == commitment.canonical_commitment {
-                                                                            let aocl_idx = prev_aocl + i as u64;
-                                                                            utxo_data.aocl_leaf_index = Some(aocl_idx);
-
-                                                                            // Check bloom filter (spent status)
-                                                                            let abs_set = AbsoluteIndexSet::compute(item, sr, rp, aocl_idx);
-                                                                            if let Ok(abs_json) = serde_json::to_value(&abs_set) {
-                                                                                if let Ok(is_spent) = rpc.are_bloom_indices_set(&abs_json).await {
-                                                                                    utxo_data.likely_spent = is_spent;
-                                                                                }
-                                                                            }
-                                                                            break;
-                                                                        }
-                                                                    }
-                                                                }
-                                                            }
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
+    // Parse into cache: height → (BlockKernel, block_hash)
+    let mut block_cache: HashMap<u64, (BlockKernel, Digest)> = HashMap::new();
+    for handle in block_handles {
+        let (h, result) = handle.await
+            .map_err(|e| format!("Block fetch task error: {}", e))?;
+        if let Ok(json) = result {
+            let blocks_json = json.get("blocks").cloned().unwrap_or(json);
+            if let Ok(rpc_blocks) = serde_json::from_value::<Vec<RpcWalletBlock>>(blocks_json) {
+                if let Some(rpc_block) = rpc_blocks.into_iter().next() {
+                    let hash = rpc_block.hash();
+                    let kernel: BlockKernel = rpc_block.kernel.into();
+                    block_cache.insert(h, (kernel, hash));
                 }
             }
+        }
+    }
+    eprintln!("[SYNC] Cached {} wallet blocks", block_cache.len());
+
+    // Step 6: Compute AOCL indices using cached blocks, prepare bloom filter checks
+    struct BloomCheck {
+        utxo_idx: usize,
+        abs_json: serde_json::Value,
+    }
+    let mut bloom_checks: Vec<BloomCheck> = Vec::new();
+
+    for (idx, utxo_data) in discovered.iter_mut().enumerate() {
+        if utxo_data.block_height == 0 {
+            continue;
+        }
+
+        let prev_height = utxo_data.block_height - 1;
+        let cur_height = utxo_data.block_height;
+
+        let (prev_kernel, prev_hash) = match block_cache.get(&prev_height) {
+            Some(v) => v,
+            None => continue,
+        };
+        let (cur_kernel, cur_hash) = match block_cache.get(&cur_height) {
+            Some(v) => v,
+            None => continue,
+        };
+
+        // Compute prev block AOCL leaf count
+        let prev_aocl = match prev_kernel.guesser_fee_addition_records(*prev_hash) {
+            Ok(gf) => prev_kernel.body.mutator_set_accumulator_after(gf).aocl.num_leafs(),
+            Err(_) => continue,
+        };
+
+        // Get all addition records from current block
+        let all_additions = match cur_kernel.all_addition_records(*cur_hash) {
+            Ok(a) => a,
+            Err(_) => continue,
+        };
+
+        // Deserialize UTXO data to compute commitment
+        let utxo_bytes = match hex::decode(&utxo_data.utxo_hex) {
+            Ok(b) => b,
+            Err(_) => continue,
+        };
+        let utxo: neptune_cash::protocol::consensus::transaction::utxo::Utxo =
+            match bincode::deserialize(&utxo_bytes) {
+                Ok(u) => u,
+                Err(_) => continue,
+            };
+        let sr_bytes = match hex::decode(&utxo_data.sender_randomness_hex) {
+            Ok(b) => b,
+            Err(_) => continue,
+        };
+        let sr: Digest = match bincode::deserialize(&sr_bytes) {
+            Ok(d) => d,
+            Err(_) => continue,
+        };
+        let rp_bytes = match hex::decode(&utxo_data.receiver_preimage_hex) {
+            Ok(b) => b,
+            Err(_) => continue,
+        };
+        let rp: Digest = match bincode::deserialize(&rp_bytes) {
+            Ok(d) => d,
+            Err(_) => continue,
+        };
+
+        let item = neptune_cash::prelude::triton_vm::prelude::Tip5::hash(&utxo);
+        let receiver_digest = rp.hash();
+        let commitment = neptune_cash::util_types::mutator_set::commit(item, sr, receiver_digest);
+
+        // Find our UTXO's position in the block's additions
+        let mut found = false;
+        for (i, addition) in all_additions.iter().enumerate() {
+            if addition.canonical_commitment == commitment.canonical_commitment {
+                let aocl_idx = prev_aocl + i as u64;
+                utxo_data.aocl_leaf_index = Some(aocl_idx);
+
+                // Prepare bloom filter check (will run in parallel)
+                let abs_set = AbsoluteIndexSet::compute(item, sr, rp, aocl_idx);
+                if let Ok(abs_json) = serde_json::to_value(&abs_set) {
+                    bloom_checks.push(BloomCheck { utxo_idx: idx, abs_json });
+                }
+                found = true;
+                break;
+            }
+        }
+        if !found {
+            eprintln!("[SYNC] Warning: UTXO at index {} not found in block {} additions", idx, cur_height);
+        }
+    }
+
+    // Step 7: Run all bloom filter checks in parallel
+    eprintln!("[SYNC] Running {} bloom filter checks in parallel...", bloom_checks.len());
+    let mut bloom_handles = Vec::new();
+    for check in bloom_checks {
+        let rpc_clone = rpc.clone();
+        bloom_handles.push(tokio::spawn(async move {
+            (check.utxo_idx, rpc_clone.are_bloom_indices_set(&check.abs_json).await)
+        }));
+    }
+
+    for handle in bloom_handles {
+        let (idx, result) = handle.await
+            .map_err(|e| format!("Bloom check task error: {}", e))?;
+        if let Ok(is_spent) = result {
+            discovered[idx].likely_spent = is_spent;
         }
     }
 
@@ -258,6 +370,8 @@ pub async fn scan_for_utxos(
         let amounts: Vec<&str> = unspent.iter().map(|u| u.amount.as_str()).collect();
         format!("{} UTXOs ({})", unspent.len(), amounts.join(" + "))
     };
+
+    eprintln!("[SYNC] Done: {} UTXOs ({} unspent)", discovered.len(), unspent.len());
 
     Ok(SyncResult {
         balance,
