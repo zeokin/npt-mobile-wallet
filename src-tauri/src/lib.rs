@@ -687,7 +687,7 @@ async fn check_transaction_mined(
     let result = rpc.was_mined(&params).await?;
     eprintln!("[CHECK_MINED] Response: {}", serde_json::to_string(&result).unwrap_or_default());
 
-    let heights = result.get("blockHeights")
+    let heights: Vec<u64> = result.get("blockHeights")
         .or_else(|| result.get("block_heights"))
         .and_then(|v| v.as_array())
         .map(|arr| arr.iter().filter_map(|v| v.as_u64()).collect())
