@@ -135,7 +135,7 @@ export default function SendScreen() {
                 <p className="text-sm text-red-400 font-semibold">Sending blocked</p>
                 <p className="text-xs text-red-400/80 mt-1">
                   A previous transaction is waiting to be mined.
-                  Go to History to check its status, or clear it from the Wallet page.
+                  Sync your wallet to check if it has been confirmed.
                 </p>
               </div>
             )}
