@@ -46,6 +46,11 @@ export const syncWallet = (pin: string | null, numKeys?: number) =>
 export const checkTransactionMined = (additionRecordHexes: string[]) =>
   invoke<number[]>("check_transaction_mined", { additionRecordHexes });
 
+// Pending transaction guard (prevents double-spend)
+export const hasPendingTx = () => invoke<boolean>("has_pending_tx");
+export const loadPendingTx = () => invoke<string>("load_pending_tx");
+export const clearPendingTx = () => invoke<void>("clear_pending_tx");
+
 // Save/load outgoing history to Tauri app data (survives localStorage clear)
 export const saveOutgoingHistory = (historyJson: string) =>
   invoke<void>("save_outgoing_history", { historyJson });

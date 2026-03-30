@@ -1,16 +1,33 @@
-import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
-import { ArrowUpRight, RefreshCw, Copy } from "lucide-react";
+import { useEffect, useState, useCallback } from "react";
+import { useNavigate, useLocation } from "react-router-dom";
+import { ArrowUpRight, RefreshCw, Copy, Clock } from "lucide-react";
 import { toast } from "sonner";
-import { getBlockHeight, syncWallet, connectNode, generateLocalAddress } from "../api/rpc";
+import {
+  getBlockHeight,
+  syncWallet,
+  connectNode,
+  generateLocalAddress,
+  hasPendingTx,
+  clearPendingTx,
+  checkTransactionMined,
+  loadPendingTx,
+  saveOutgoingHistory,
+} from "../api/rpc";
 import { useSettingsStore } from "../store/settings-store";
 import { useWalletStore } from "../store/wallet-store";
 import NavBar from "../components/ui/NavBar";
 
 const DEFAULT_SUPPORTER = "https://wallet.neptunefundamentals.org";
 
+/// Blocks since send before we auto-clear a stuck pending tx.
+/// ~20 blocks ≈ 200 minutes — if not mined by then, it was likely dropped.
+const STALE_PENDING_BLOCKS = 20;
+
 export default function WalletScreen() {
   const navigate = useNavigate();
+  const location = useLocation();
+  const freshUnlock = (location.state as any)?.freshUnlock === true;
+
   const { network, blockHeight, connected, setConnected } = useSettingsStore();
   const { balance, utxos, outgoingTxs, setBalance, setUtxos, clearPendingWithoutRecords } = useWalletStore();
 
@@ -19,6 +36,7 @@ export default function WalletScreen() {
   const [syncing, setSyncing] = useState(false);
   const [syncInfo, setSyncInfo] = useState<string | null>(null);
   const [myAddress, setMyAddress] = useState("");
+  const [pendingBlocked, setPendingBlocked] = useState(false);
 
   // Balance breakdown
   const unspentUtxos = utxos.filter((u) => !u.likely_spent);
@@ -33,14 +51,127 @@ export default function WalletScreen() {
     if (store.loadOutgoingFromAppData) store.loadOutgoingFromAppData();
   }, []);
 
-  // Auto-connect if not connected
-  useEffect(() => {
-    if (!connected) {
-      connectNode(DEFAULT_SUPPORTER)
-        .then((info) => setConnected(true, info.network, info.block_height))
-        .catch(() => {});
+  // Resolve pending tx: check if mined, auto-clear if stale
+  const resolvePendingTx = useCallback(async (currentBlockHeight: number): Promise<boolean> => {
+    const isPending = await hasPendingTx();
+    if (!isPending) {
+      setPendingBlocked(false);
+      return false;
     }
+    setPendingBlocked(true);
+
+    try {
+      const pendingJson = await loadPendingTx();
+      const pendingData = JSON.parse(pendingJson);
+      const additionRecords: string[] = pendingData.addition_record_hexes || [];
+      const pendingTimestamp: number = pendingData.timestamp || 0;
+
+      if (additionRecords.length > 0) {
+        // Check if tx was mined
+        const heights = await checkTransactionMined(additionRecords);
+        if (heights.length > 0) {
+          // Confirmed — update outgoing history
+          const store = useWalletStore.getState();
+          const updated = store.outgoingTxs.map((t) =>
+            t.status === "pending"
+              ? { ...t, status: "confirmed" as const, confirmed_height: heights[0] }
+              : t
+          );
+          useWalletStore.setState({ outgoingTxs: updated });
+          saveOutgoingHistory(JSON.stringify(updated)).catch(() => {});
+          setPendingBlocked(false);
+          toast.success(`Transaction confirmed at block ${heights[0]}!`);
+          return false;
+        }
+
+        // Not mined — check if stale (20+ blocks since send)
+        if (pendingTimestamp > 0 && currentBlockHeight > 0) {
+          const now = Math.floor(Date.now() / 1000);
+          const secondsSinceSend = now - pendingTimestamp;
+          const estimatedBlocksSinceSend = Math.floor(secondsSinceSend / 600);
+
+          if (estimatedBlocksSinceSend >= STALE_PENDING_BLOCKS) {
+            // Auto-clear stale pending tx
+            await clearPendingTx();
+            const store = useWalletStore.getState();
+            const updated = store.outgoingTxs.filter((t) => t.status !== "pending");
+            useWalletStore.setState({ outgoingTxs: updated });
+            saveOutgoingHistory(JSON.stringify(updated)).catch(() => {});
+            setPendingBlocked(false);
+            console.log(`[WALLET] Auto-cleared stale pending tx (${estimatedBlocksSinceSend} blocks old)`);
+            toast("Stale pending transaction auto-cleared.");
+            return false;
+          }
+        }
+      }
+    } catch {
+      // Failed to check — keep pending
+    }
+
+    return true; // still pending
   }, []);
+
+  // Sync wallet and resolve pending tx in one operation
+  const doSync = useCallback(async (showToast = true) => {
+    if (!useSettingsStore.getState().connected) return;
+    setSyncing(true);
+    setSyncInfo("Scanning blockchain...");
+    try {
+      const result = await syncWallet(null, 5);
+      setBalance(result.balance);
+      setUtxos(result.utxos);
+      setSyncInfo(
+        `Found ${result.utxo_count} UTXOs in ${result.blocks_scanned} blocks`
+      );
+      if (showToast && result.utxo_count > 0) {
+        toast.success(`Found ${result.utxo_count} UTXOs`);
+      }
+
+      // After sync, resolve pending tx with current block height
+      const currentHeight = useSettingsStore.getState().blockHeight || 0;
+      await resolvePendingTx(currentHeight);
+    } catch (e) {
+      setSyncInfo(null);
+      if (showToast) toast.error(String(e));
+    } finally {
+      setSyncing(false);
+    }
+  }, [setBalance, setUtxos, resolvePendingTx]);
+
+  // Auto-connect + auto-sync ONLY when coming from unlock/create/import
+  useEffect(() => {
+    if (!freshUnlock) {
+      // Coming from History/Settings/Send — just check pending, no sync
+      hasPendingTx().then(setPendingBlocked).catch(() => {});
+      return;
+    }
+
+    // Clear the navigation state so back-navigation doesn't re-trigger
+    window.history.replaceState({}, "");
+
+    let cancelled = false;
+    const init = async () => {
+      // Step 1: Connect if not connected
+      if (!useSettingsStore.getState().connected) {
+        try {
+          const info = await connectNode(DEFAULT_SUPPORTER);
+          if (cancelled) return;
+          setConnected(true, info.network, info.block_height);
+        } catch {
+          if (cancelled) return;
+          hasPendingTx().then(setPendingBlocked).catch(() => {});
+          return;
+        }
+      }
+
+      // Step 2: Auto-sync
+      if (!cancelled) {
+        await doSync(false);
+      }
+    };
+    init();
+    return () => { cancelled = true; };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Generate address automatically
   useEffect(() => {
@@ -64,33 +195,6 @@ export default function WalletScreen() {
     const interval = setInterval(fetchHeight, 30000);
     return () => clearInterval(interval);
   }, [connected]);
-
-  // No auto-sync — user clicks Sync button manually
-
-  const doSync = async () => {
-    if (!connected) {
-      toast.error("Not connected to supporter");
-      return;
-    }
-    setSyncing(true);
-    setSyncInfo("Scanning blockchain...");
-    try {
-      const result = await syncWallet(null, 5);
-      setBalance(result.balance);
-      setUtxos(result.utxos);
-      setSyncInfo(
-        `Found ${result.utxo_count} UTXOs in ${result.blocks_scanned} blocks`
-      );
-      if (result.utxo_count > 0) {
-        toast.success(`Found ${result.utxo_count} UTXOs`);
-      }
-    } catch (e) {
-      setSyncInfo(null);
-      toast.error(String(e));
-    } finally {
-      setSyncing(false);
-    }
-  };
 
   const handleCopyAddress = () => {
     if (myAddress) {
@@ -140,6 +244,19 @@ export default function WalletScreen() {
           </div>
         </div>
 
+        {/* Pending transaction banner — info only, resolved by sync */}
+        {pendingBlocked && (
+          <div className="w-full max-w-xs mb-3 p-3 rounded-lg bg-yellow-500/10 border border-yellow-500/30">
+            <div className="flex items-center gap-2">
+              <Clock size={14} className="text-yellow-400" />
+              <span className="text-xs text-yellow-400 font-semibold">Transaction pending</span>
+            </div>
+            <p className="text-xs text-yellow-400/70 mt-1">
+              Waiting to be mined. Sync wallet to check status.
+            </p>
+          </div>
+        )}
+
         {/* My address */}
         <button
           onClick={handleCopyAddress}
@@ -156,7 +273,7 @@ export default function WalletScreen() {
 
         {/* Sync button */}
         <button
-          onClick={doSync}
+          onClick={() => doSync(true)}
           disabled={syncing}
           className="flex items-center gap-2 mb-6 px-4 py-2 rounded-lg text-sm text-[var(--npt-muted)] border border-[var(--npt-border)] hover:border-[var(--npt-blue)] hover:text-[var(--npt-blue)] disabled:opacity-50 transition-colors"
         >

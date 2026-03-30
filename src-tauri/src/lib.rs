@@ -31,6 +31,9 @@ struct AppState {
     failed_pin_attempts: Mutex<u32>,
     /// When the last lockout started (if any).
     lockout_until: Mutex<Option<Instant>>,
+    /// True while a submitted transaction is waiting to be mined.
+    /// Blocks additional sends to prevent double-spending.
+    has_pending_tx: Mutex<bool>,
 }
 
 #[derive(Serialize)]
@@ -240,6 +243,31 @@ async fn send_transaction(
 ) -> Result<String, String> {
     check_session(&state)?;
     touch_session(&state);
+
+    // Block sending while a previous transaction is pending (prevents double-spend)
+    // Check both in-memory flag and disk file (handles app restart)
+    let is_pending = {
+        let in_memory = *state.has_pending_tx.lock().unwrap();
+        if in_memory {
+            true
+        } else if let Ok(dir) = app.path().app_data_dir() {
+            let path = dir.join("pending_tx.json");
+            if path.exists() {
+                *state.has_pending_tx.lock().unwrap() = true;
+                true
+            } else {
+                false
+            }
+        } else {
+            false
+        }
+    };
+    if is_pending {
+        return Err(
+            "A transaction is already pending. Wait for it to be mined or clear it before sending again.".to_string()
+        );
+    }
+
     let rpc = get_rpc(&state)?;
     let entropy = get_wallet_entropy(&app, &pin)?;
 
@@ -573,6 +601,26 @@ async fn send_transaction(
     eprintln!("[SEND] Output addition records ({} outputs): {:?}",
         addition_jsons.len(), addition_jsons);
 
+    // Mark pending — blocks further sends until confirmed or cleared
+    *state.has_pending_tx.lock().unwrap() = true;
+
+    // Persist pending state to disk (survives app restart)
+    let pending_data = serde_json::json!({
+        "addition_record_hexes": addition_jsons,
+        "timestamp": std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0),
+    });
+    if let Ok(dir) = app.path().app_data_dir() {
+        let _ = std::fs::create_dir_all(&dir);
+        let _ = std::fs::write(
+            dir.join("pending_tx.json"),
+            serde_json::to_string_pretty(&pending_data).unwrap_or_default(),
+        );
+        eprintln!("[SEND] Pending state persisted to disk");
+    }
+
     let result = serde_json::json!({
         "success": true,
         "addition_record_hexes": addition_jsons,
@@ -610,6 +658,7 @@ fn load_outgoing_history(app: tauri::AppHandle) -> Result<String, String> {
 /// Takes addition record hex strings, returns block heights if mined.
 #[tauri::command]
 async fn check_transaction_mined(
+    app: tauri::AppHandle,
     addition_record_hexes: Vec<String>,
     state: State<'_, AppState>,
 ) -> Result<Vec<u64>, String> {
@@ -638,14 +687,71 @@ async fn check_transaction_mined(
     let result = rpc.was_mined(&params).await?;
     eprintln!("[CHECK_MINED] Response: {}", serde_json::to_string(&result).unwrap_or_default());
 
-    let heights = result.get("blockHeights")
+    let heights: Vec<u64> = result.get("blockHeights")
         .or_else(|| result.get("block_heights"))
         .and_then(|v| v.as_array())
         .map(|arr| arr.iter().filter_map(|v| v.as_u64()).collect())
         .unwrap_or_default();
 
     eprintln!("[CHECK_MINED] Block heights: {:?}", heights);
+
+    // Auto-clear pending flag when transaction is confirmed (memory + disk)
+    if !heights.is_empty() {
+        *state.has_pending_tx.lock().unwrap() = false;
+        if let Ok(dir) = app.path().app_data_dir() {
+            let _ = std::fs::remove_file(dir.join("pending_tx.json"));
+        }
+        eprintln!("[CHECK_MINED] Transaction confirmed — pending flag cleared (memory + disk)");
+    }
+
     Ok(heights)
+}
+
+/// Check whether a pending transaction is blocking sends.
+/// Checks in-memory flag first, then falls back to disk (handles app restart).
+#[tauri::command]
+fn has_pending_tx(app: tauri::AppHandle, state: State<'_, AppState>) -> bool {
+    let in_memory = *state.has_pending_tx.lock().unwrap();
+    if in_memory {
+        return true;
+    }
+    // Check disk — pending_tx.json survives restart
+    if let Ok(dir) = app.path().app_data_dir() {
+        let path = dir.join("pending_tx.json");
+        if path.exists() {
+            // Restore in-memory flag from disk
+            *state.has_pending_tx.lock().unwrap() = true;
+            eprintln!("[PENDING] Restored pending flag from disk");
+            return true;
+        }
+    }
+    false
+}
+
+/// Load pending tx addition records from disk (for auto-resolve during sync).
+#[tauri::command]
+fn load_pending_tx(app: tauri::AppHandle) -> Result<String, String> {
+    let dir = app.path().app_data_dir()
+        .map_err(|e| format!("App data dir: {}", e))?;
+    let path = dir.join("pending_tx.json");
+    if path.exists() {
+        std::fs::read_to_string(&path)
+            .map_err(|e| format!("Read pending_tx: {}", e))
+    } else {
+        Ok("{}".to_string())
+    }
+}
+
+/// Manually clear the pending transaction flag.
+/// Use when a transaction was dropped/rejected and will never be mined.
+#[tauri::command]
+fn clear_pending_tx(app: tauri::AppHandle, state: State<'_, AppState>) {
+    *state.has_pending_tx.lock().unwrap() = false;
+    // Remove from disk too
+    if let Ok(dir) = app.path().app_data_dir() {
+        let _ = std::fs::remove_file(dir.join("pending_tx.json"));
+    }
+    eprintln!("[PENDING] Pending flag cleared (memory + disk)");
 }
 
 /// Scan the blockchain for UTXOs belonging to this wallet.
@@ -783,6 +889,7 @@ pub fn run() {
             last_activity: Mutex::new(None),
             failed_pin_attempts: Mutex::new(0),
             lockout_until: Mutex::new(None),
+            has_pending_tx: Mutex::new(false),
         })
         .invoke_handler(tauri::generate_handler![
             // Wallet
@@ -801,6 +908,9 @@ pub fn run() {
             sync_wallet,
             send_transaction,
             check_transaction_mined,
+            has_pending_tx,
+            load_pending_tx,
+            clear_pending_tx,
             save_outgoing_history,
             load_outgoing_history,
             // Supporter

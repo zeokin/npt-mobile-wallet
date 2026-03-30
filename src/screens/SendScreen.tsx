@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { invoke } from "@tauri-apps/api/core";
+import { hasPendingTx } from "../api/rpc";
 import { useSettingsStore } from "../store/settings-store";
 import { useWalletStore } from "../store/wallet-store";
 import NavBar from "../components/ui/NavBar";
@@ -17,6 +18,12 @@ export default function SendScreen() {
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState("");
   const [step, setStep] = useState<"form" | "confirm">("form");
+  const [pendingBlocked, setPendingBlocked] = useState(false);
+
+  // Check backend pending flag on mount
+  useEffect(() => {
+    hasPendingTx().then(setPendingBlocked).catch(() => {});
+  }, []);
 
   const unspentUtxos = utxos.filter((u) => !u.likely_spent);
   const availableBalance = unspentUtxos.reduce((sum, u) => sum + (parseFloat(u.amount) || 0), 0);
@@ -38,7 +45,8 @@ export default function SendScreen() {
     totalNeeded <= effectiveBalance &&
     connected &&
     unspentUtxos.length > 0 &&
-    !loading;
+    !loading &&
+    !pendingBlocked;
 
   const handleNext = () => {
     if (!canSend) return;
@@ -121,6 +129,16 @@ export default function SendScreen() {
                 onChange={(e) => setFee(e.target.value)}
                 className="w-full px-3 py-3 rounded-lg bg-[var(--npt-card)] border border-[var(--npt-border)] text-[var(--npt-text)] focus:outline-none focus:border-[var(--npt-blue)]" />
             </div>
+
+            {pendingBlocked && (
+              <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/30">
+                <p className="text-sm text-red-400 font-semibold">Sending blocked</p>
+                <p className="text-xs text-red-400/80 mt-1">
+                  A previous transaction is waiting to be mined.
+                  Sync your wallet to check if it has been confirmed.
+                </p>
+              </div>
+            )}
 
             <div className="p-3 rounded-lg bg-[var(--npt-card)] border border-[var(--npt-border)] space-y-1">
               <div className="flex justify-between text-xs">

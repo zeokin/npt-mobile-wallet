@@ -105,7 +105,7 @@ export default function SeedCreateScreen() {
     if (quizIndex + 1 >= TOTAL_QUESTIONS) {
       // All questions answered — wallet is already saved, proceed
       toast.success("Wallet created successfully!");
-      navigate("/wallet", { replace: true });
+      navigate("/wallet", { replace: true, state: { freshUnlock: true } });
     } else {
       // Next question
       setQuizIndex(quizIndex + 1);
