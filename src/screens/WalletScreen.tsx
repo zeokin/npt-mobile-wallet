@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import { ArrowUpRight, RefreshCw, Copy, Clock } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -23,11 +23,11 @@ const DEFAULT_SUPPORTER = "https://wallet.neptunefundamentals.org";
 /// ~20 blocks ≈ 200 minutes — if not mined by then, it was likely dropped.
 const STALE_PENDING_BLOCKS = 20;
 
-// Module-level flag: sync only once per app session, not on every page navigation.
-let sessionSyncDone = false;
-
 export default function WalletScreen() {
   const navigate = useNavigate();
+  const location = useLocation();
+  const freshUnlock = (location.state as any)?.freshUnlock === true;
+
   const { network, blockHeight, connected, setConnected } = useSettingsStore();
   const { balance, utxos, outgoingTxs, setBalance, setUtxos, clearPendingWithoutRecords } = useWalletStore();
 
@@ -85,10 +85,7 @@ export default function WalletScreen() {
         }
 
         // Not mined — check if stale (20+ blocks since send)
-        // Estimate: pending was sent at pendingTimestamp, current height is known
-        // If we don't have a block height from the pending data, use time-based fallback
         if (pendingTimestamp > 0 && currentBlockHeight > 0) {
-          // Each block ≈ 10 minutes. Estimate send block height from timestamp.
           const now = Math.floor(Date.now() / 1000);
           const secondsSinceSend = now - pendingTimestamp;
           const estimatedBlocksSinceSend = Math.floor(secondsSinceSend / 600);
@@ -141,8 +138,17 @@ export default function WalletScreen() {
     }
   }, [setBalance, setUtxos, resolvePendingTx]);
 
-  // Auto-connect + auto-sync ONCE per session (not on every page navigation)
+  // Auto-connect + auto-sync ONLY when coming from unlock/create/import
   useEffect(() => {
+    if (!freshUnlock) {
+      // Coming from History/Settings/Send — just check pending, no sync
+      hasPendingTx().then(setPendingBlocked).catch(() => {});
+      return;
+    }
+
+    // Clear the navigation state so back-navigation doesn't re-trigger
+    window.history.replaceState({}, "");
+
     let cancelled = false;
     const init = async () => {
       // Step 1: Connect if not connected
@@ -158,14 +164,9 @@ export default function WalletScreen() {
         }
       }
 
-      // Step 2: Auto-sync once per session
-      if (!cancelled && !sessionSyncDone) {
-        sessionSyncDone = true;
+      // Step 2: Auto-sync
+      if (!cancelled) {
         await doSync(false);
-      } else if (!cancelled) {
-        // Already synced this session — just check pending status
-        const currentHeight = useSettingsStore.getState().blockHeight || 0;
-        await resolvePendingTx(currentHeight);
       }
     };
     init();

@@ -31,7 +31,7 @@ export default function UnlockScreen() {
         // Continue even if connection fails — user can connect manually
       }
 
-      navigate("/wallet", { replace: true });
+      navigate("/wallet", { replace: true, state: { freshUnlock: true } });
     } catch (e) {
       const msg = String(e);
       setErrorMsg(msg);
