@@ -35,7 +35,7 @@ function AppRoutes() {
 export default function App() {
   return (
     <BrowserRouter>
-      <div className="h-full w-full bg-[var(--npt-dark)] text-[var(--npt-text)]">
+      <div className="h-full w-full bg-[var(--npt-bg)] text-[var(--npt-text)]">
         <AppRoutes />
         <Toaster
           position="top-center"
@@ -44,6 +44,13 @@ export default function App() {
               background: "var(--npt-card)",
               color: "var(--npt-text)",
               border: "1px solid var(--npt-border)",
+              borderRadius: "24px",
+              fontSize: "14px",
+              boxShadow: "0 4px 16px rgba(0,0,0,0.08)",
+            },
+            classNames: {
+              success: "!bg-[var(--npt-success)] !text-white !border-transparent",
+              error: "!bg-[var(--npt-error)] !text-white !border-transparent",
             },
           }}
         />

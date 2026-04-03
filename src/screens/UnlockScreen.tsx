@@ -1,8 +1,10 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
+import { Eye, EyeOff } from "lucide-react";
 import { unlockWallet, deleteWallet, connectNode } from "../api/rpc";
 import { useSettingsStore } from "../store/settings-store";
+import NeptuneLogo from "../components/ui/NeptuneLogo";
 
 const DEFAULT_SUPPORTER = "https://wallet.neptunefundamentals.org";
 
@@ -10,6 +12,7 @@ export default function UnlockScreen() {
   const navigate = useNavigate();
   const { setConnected } = useSettingsStore();
   const [pin, setPin] = useState("");
+  const [showPin, setShowPin] = useState(false);
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
@@ -50,42 +53,54 @@ export default function UnlockScreen() {
   };
 
   return (
-    <div className="flex flex-col items-center justify-center h-full px-6">
-      <div className="w-full max-w-sm space-y-6">
-        <div className="text-center space-y-2">
-          <div className="text-5xl font-bold text-[var(--npt-blue)]">&#x2646;</div>
-          <h1 className="text-2xl font-bold">Welcome Back</h1>
-          <p className="text-sm text-[var(--npt-muted)]">Enter your password to unlock the wallet.</p>
+    <div className="flex flex-col h-full bg-[var(--npt-blue)] safe-top safe-bottom">
+      {/* Centered content */}
+      <div className="flex-1 flex flex-col items-center justify-center px-8">
+        <NeptuneLogo size={100} />
+        <p className="mt-6 text-2xl text-white/60 font-light">Welcome back</p>
+
+        {/* Password input */}
+        <div className="w-full max-w-xs mt-10">
+          <div className="border-b border-t border-white/30 flex items-center">
+            <input
+              type={showPin ? "text" : "password"}
+              placeholder="Enter your password"
+              value={pin}
+              onChange={(e) => setPin(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && handleUnlock()}
+              className="flex-1 bg-transparent text-white text-center text-lg py-3 placeholder:text-white/40 focus:outline-none"
+            />
+            <button
+              onClick={() => setShowPin(!showPin)}
+              className="p-2 text-white/50 hover:text-white/80 transition-colors"
+            >
+              {showPin ? <EyeOff size={20} /> : <Eye size={20} />}
+            </button>
+          </div>
+          {errorMsg && (
+            <p className="text-center text-sm text-red-200 mt-2">{errorMsg}</p>
+          )}
         </div>
+      </div>
 
-        <input
-          type="password"
-          inputMode="numeric"
-          placeholder="Password"
-          value={pin}
-          onChange={(e) => setPin(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && handleUnlock()}
-          className="w-full px-3 py-3 rounded-lg bg-[var(--npt-card)] border border-[var(--npt-border)] text-[var(--npt-text)] text-center text-2xl focus:outline-none focus:border-[var(--npt-blue)]"
-        />
-
-        {errorMsg && (
-          <p className="text-center text-sm text-red-400">{errorMsg}</p>
-        )}
-
+      {/* Bottom actions */}
+      <div className="px-8 pb-8 space-y-4">
         <button
           onClick={handleUnlock}
           disabled={loading}
-          className="w-full py-3 rounded-lg bg-[var(--npt-blue)] text-white font-semibold disabled:opacity-50 active:opacity-80"
+          className="w-full py-4 rounded-full bg-white text-[var(--npt-blue)] text-lg font-semibold disabled:opacity-50 active:opacity-90 transition-opacity"
         >
-          {loading ? "Connecting..." : "Unlock"}
+          {loading ? "Connecting..." : "Unlock Wallet"}
         </button>
-
-        <button
-          onClick={handleSwitchWallet}
-          className="w-full py-2 text-sm text-[var(--npt-muted)] hover:text-red-400 transition-colors"
-        >
-          Switch Wallet (delete current)
-        </button>
+        <p className="text-center text-sm text-white/70">
+          Don't have an account?{" "}
+          <button
+            onClick={handleSwitchWallet}
+            className="font-bold text-white underline underline-offset-2"
+          >
+            Create/Import
+          </button>
+        </p>
       </div>
     </div>
   );

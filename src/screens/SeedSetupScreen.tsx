@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { walletExists } from "../api/rpc";
+import NeptuneLogo from "../components/ui/NeptuneLogo";
 
 export default function SeedSetupScreen() {
   const navigate = useNavigate();
@@ -13,32 +14,34 @@ export default function SeedSetupScreen() {
     }).catch(() => setChecking(false));
   }, [navigate]);
 
-  if (checking) return null;
+  if (checking) return <div className="h-full w-full bg-[var(--npt-blue)]" />;
 
   return (
-    <div className="flex flex-col items-center justify-center h-full px-6">
-      <div className="w-full max-w-sm space-y-6">
-        <div className="text-center space-y-2">
-          <div className="text-5xl font-bold text-[var(--npt-blue)]">&#x2646;</div>
-          <h1 className="text-2xl font-bold">Neptune Wallet</h1>
-          <p className="text-sm text-[var(--npt-muted)]">
-            Secure. Private. Self-sovereign.
-          </p>
-        </div>
-        <div className="space-y-3">
-          <button
-            onClick={() => navigate("/seed/create")}
-            className="w-full py-3 rounded-lg bg-[var(--npt-blue)] text-white font-semibold active:opacity-80"
-          >
-            Create New Wallet
-          </button>
+    <div className="flex flex-col h-full bg-[var(--npt-blue)] safe-top safe-bottom">
+      {/* Centered content */}
+      <div className="flex-1 flex flex-col items-center justify-center px-8">
+        <NeptuneLogo size={100} />
+        <p className="mt-6 text-xl text-white/60 font-light">Welcome to</p>
+        <h1 className="text-5xl font-bold text-white tracking-tight">neptune</h1>
+      </div>
+
+      {/* Bottom actions */}
+      <div className="px-8 pb-8 space-y-4">
+        <button
+          onClick={() => navigate("/seed/create")}
+          className="w-full py-4 rounded-full bg-white text-[var(--npt-blue)] text-lg font-semibold active:opacity-90 transition-opacity"
+        >
+          Create New Wallet
+        </button>
+        <p className="text-center text-sm text-white/70">
+          Already have a wallet?{" "}
           <button
             onClick={() => navigate("/seed/import")}
-            className="w-full py-3 rounded-lg bg-[var(--npt-card)] border border-[var(--npt-border)] text-[var(--npt-text)] font-semibold active:opacity-80"
+            className="font-bold text-white underline underline-offset-2"
           >
-            Import Seed Phrase
+            Import wallet
           </button>
-        </div>
+        </p>
       </div>
     </div>
   );

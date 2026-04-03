@@ -1,11 +1,13 @@
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
-import { Copy } from "lucide-react";
+import { ChevronLeft, Copy, QrCode } from "lucide-react";
+import { QRCodeSVG } from "qrcode.react";
 import { generateLocalAddress } from "../api/rpc";
 import { useSettingsStore } from "../store/settings-store";
-import NavBar from "../components/ui/NavBar";
 
 export default function ReceiveScreen() {
+  const navigate = useNavigate();
   const [address, setAddress] = useState("");
   const [loading, setLoading] = useState(false);
   const [addressIndex, setAddressIndex] = useState(0);
@@ -31,46 +33,61 @@ export default function ReceiveScreen() {
   };
 
   return (
-    <div className="flex flex-col h-full">
-      <div className="px-4 pt-4 pb-2">
-        <h1 className="text-xl font-bold">Receive NPT</h1>
-        <p className="text-xs text-[var(--npt-muted)]">
+    <div className="flex flex-col h-full bg-[var(--npt-bg)] safe-top safe-bottom">
+      {/* Header */}
+      <div className="flex items-center px-4 py-3">
+        <button onClick={() => navigate("/wallet")} className="p-1 text-[var(--npt-text)]">
+          <ChevronLeft size={24} />
+        </button>
+        <h1 className="flex-1 text-center text-lg font-semibold pr-8">Receive NPT</h1>
+      </div>
+
+      <div className="flex-1 overflow-y-auto flex flex-col items-center px-5 py-4 space-y-5">
+        <p className="text-xs text-[var(--npt-muted)] text-center">
           Addresses are generated locally — no network needed
         </p>
-      </div>
-      <div className="flex-1 overflow-y-auto flex flex-col items-center px-4 py-4 space-y-4">
+
         {address && (
           <>
-            <div className="p-3 rounded-lg bg-[var(--npt-blue)]/10 border border-[var(--npt-blue)]/30">
-              <p className="text-xs text-[var(--npt-blue)] text-center">
-                Share this address with the sender
-              </p>
+            {/* QR Code */}
+            <div className="p-4 bg-white rounded-2xl border border-[var(--npt-border)] shadow-sm">
+              <QRCodeSVG value={address} size={180} level="M" />
             </div>
+
+            {/* Address card */}
             <div className="w-full max-w-sm">
-              <div className="flex items-start gap-2 p-3 rounded-lg bg-[var(--npt-card)] border border-[var(--npt-border)]">
-                <p className="flex-1 text-xs font-mono break-all max-h-32 overflow-y-auto">
+              <div className="flex items-start gap-2 p-3 rounded-xl bg-white border border-[var(--npt-border)] shadow-sm">
+                <p className="flex-1 text-xs font-mono text-[var(--npt-muted)] break-all max-h-28 overflow-y-auto leading-relaxed">
                   {address}
                 </p>
-                <button onClick={handleCopy} className="text-[var(--npt-blue)] p-1 shrink-0">
+                <button onClick={handleCopy} className="text-[var(--npt-blue)] p-1 shrink-0 active:opacity-70">
                   <Copy size={16} />
                 </button>
               </div>
-              <p className="text-xs text-[var(--npt-muted)] text-center mt-1">
+              <p className="text-xs text-[var(--npt-muted)] text-center mt-1.5">
                 {address.length} characters
               </p>
             </div>
           </>
         )}
 
+        {!address && (
+          <div className="flex-1 flex flex-col items-center justify-center gap-3">
+            <div className="w-16 h-16 rounded-full bg-[var(--npt-blue)]/10 flex items-center justify-center">
+              <QrCode size={28} className="text-[var(--npt-blue)]" />
+            </div>
+            <p className="text-sm text-[var(--npt-muted)]">Generate an address to receive funds</p>
+          </div>
+        )}
+
         <button
           onClick={doGenerate}
           disabled={loading}
-          className="px-6 py-3 rounded-lg bg-[var(--npt-blue)] text-white font-semibold disabled:opacity-50 active:opacity-80"
+          className="px-8 py-3.5 rounded-full bg-[var(--npt-blue)] text-white font-semibold disabled:opacity-50 active:opacity-90 transition-opacity"
         >
           {loading ? "Generating..." : address ? "Generate New Address" : "Generate Address"}
         </button>
       </div>
-      <NavBar />
     </div>
   );
 }

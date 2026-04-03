@@ -2,10 +2,10 @@ import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { invoke } from "@tauri-apps/api/core";
+import { ChevronLeft, Send, Info, AlertCircle, Eye, EyeOff, Clock } from "lucide-react";
 import { hasPendingTx } from "../api/rpc";
 import { useSettingsStore } from "../store/settings-store";
 import { useWalletStore } from "../store/wallet-store";
-import NavBar from "../components/ui/NavBar";
 
 export default function SendScreen() {
   const navigate = useNavigate();
@@ -15,12 +15,12 @@ export default function SendScreen() {
   const [amount, setAmount] = useState("");
   const [fee, setFee] = useState("0.5");
   const [pin, setPin] = useState("");
+  const [showPin, setShowPin] = useState(false);
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState("");
-  const [step, setStep] = useState<"form" | "confirm">("form");
+  const [step, setStep] = useState<"form" | "confirm" | "building">("form");
   const [pendingBlocked, setPendingBlocked] = useState(false);
 
-  // Check backend pending flag on mount
   useEffect(() => {
     hasPendingTx().then(setPendingBlocked).catch(() => {});
   }, []);
@@ -31,12 +31,12 @@ export default function SendScreen() {
   const feeNum = parseFloat(fee) || 0;
   const totalNeeded = amountNum + feeNum;
 
-  // Subtract pending outgoing from available balance
   const { outgoingTxs } = useWalletStore();
   const pendingOutgoing = outgoingTxs
     .filter((tx) => tx.status === "pending")
     .reduce((sum, tx) => sum + (parseFloat(tx.amount) || 0) + (parseFloat(tx.fee) || 0), 0);
   const effectiveBalance = Math.max(0, availableBalance - pendingOutgoing);
+  const insufficientBalance = totalNeeded > effectiveBalance && amountNum > 0;
 
   const canSend =
     address.trim().length > 0 &&
@@ -58,9 +58,9 @@ export default function SendScreen() {
       toast.error("Enter your password to confirm");
       return;
     }
-    setStep("form");
+    setStep("building");
     setLoading(true);
-    setStatus("Building transaction locally...");
+    setStatus("Building transaction...");
 
     try {
       const resultStr = await invoke<string>("send_transaction", {
@@ -71,7 +71,6 @@ export default function SendScreen() {
         utxoIndices: unspentUtxos.map((_, i) => i),
       });
 
-      // Parse addition records from response
       let additionRecordHexes: string[] = [];
       try {
         const parsed = JSON.parse(resultStr);
@@ -92,6 +91,7 @@ export default function SendScreen() {
     } catch (e) {
       const msg = String(e);
       setStatus("");
+      setStep("form");
       toast.error(msg, { duration: 10000 });
     } finally {
       setLoading(false);
@@ -100,125 +100,178 @@ export default function SendScreen() {
   };
 
   return (
-    <div className="flex flex-col h-full">
-      <div className="px-4 pt-4 pb-2">
-        <h1 className="text-xl font-bold">Send NPT</h1>
+    <div className="flex flex-col h-full bg-[var(--npt-bg)] safe-top safe-bottom">
+      {/* Header */}
+      <div className="flex items-center px-4 py-3">
+        <button
+          onClick={() => navigate("/wallet")}
+          className="p-1 text-[var(--npt-text)]"
+        >
+          <ChevronLeft size={24} />
+        </button>
+        <h1 className="flex-1 text-center text-lg font-semibold pr-8">Send NPT</h1>
       </div>
-      <div className="flex-1 overflow-y-auto px-4 space-y-4">
-        {step === "form" && (
-          <>
+
+      {/* Send icon */}
+      <div className="flex justify-center py-2">
+        <div className="w-14 h-14 rounded-full bg-[var(--npt-blue)]/10 flex items-center justify-center">
+          <Send size={24} className="text-[var(--npt-blue)] -rotate-45" />
+        </div>
+      </div>
+
+      <div className="flex-1 overflow-y-auto px-5 pb-4">
+        {/* Form */}
+        {(step === "form" || step === "confirm" || step === "building") && (
+          <div className="space-y-4 animate-fade-in">
+            {/* Recipient */}
             <div>
-              <label className="block text-sm text-[var(--npt-muted)] mb-1">Recipient Address</label>
-              <textarea
-                rows={3}
-                placeholder="Neptune address (nolga...)"
-                value={address}
-                onChange={(e) => setAddress(e.target.value)}
-                className="w-full px-3 py-2 rounded-lg bg-[var(--npt-card)] border border-[var(--npt-border)] text-[var(--npt-text)] text-sm resize-none focus:outline-none focus:border-[var(--npt-blue)]"
-              />
-            </div>
-            <div>
-              <label className="block text-sm text-[var(--npt-muted)] mb-1">Amount (NPT)</label>
-              <input type="number" step="any" placeholder="0.00" value={amount}
-                onChange={(e) => setAmount(e.target.value)}
-                className="w-full px-3 py-3 rounded-lg bg-[var(--npt-card)] border border-[var(--npt-border)] text-[var(--npt-text)] focus:outline-none focus:border-[var(--npt-blue)]" />
-            </div>
-            <div>
-              <label className="block text-sm text-[var(--npt-muted)] mb-1">Fee (NPT)</label>
-              <input type="number" step="any" value={fee}
-                onChange={(e) => setFee(e.target.value)}
-                className="w-full px-3 py-3 rounded-lg bg-[var(--npt-card)] border border-[var(--npt-border)] text-[var(--npt-text)] focus:outline-none focus:border-[var(--npt-blue)]" />
+              <label className="block text-xs text-[var(--npt-muted)] mb-1 font-medium">Recipient Address</label>
+              <p className="text-xs text-[var(--npt-muted)] break-all leading-relaxed">
+                {address || "No address entered"}
+              </p>
+              {step === "form" && (
+                <textarea
+                  rows={3}
+                  placeholder="Neptune address (nolga...)"
+                  value={address}
+                  onChange={(e) => setAddress(e.target.value)}
+                  className="mt-1 w-full px-3 py-2 rounded-xl bg-white border border-[var(--npt-border)] text-[var(--npt-text)] text-sm resize-none focus:outline-none focus:border-[var(--npt-blue)]"
+                />
+              )}
             </div>
 
-            {pendingBlocked && (
-              <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/30">
-                <p className="text-sm text-red-400 font-semibold">Sending blocked</p>
-                <p className="text-xs text-red-400/80 mt-1">
+            {/* Amount */}
+            <div>
+              <label className="block text-xs text-[var(--npt-muted)] mb-1 font-medium">Amount (NPT)</label>
+              {step === "form" ? (
+                <input
+                  type="number"
+                  step="any"
+                  placeholder="0.000000"
+                  value={amount}
+                  onChange={(e) => setAmount(e.target.value)}
+                  className="w-full px-3 py-3 rounded-xl bg-white border border-[var(--npt-border)] text-[var(--npt-text)] text-xl font-semibold focus:outline-none focus:border-[var(--npt-blue)]"
+                />
+              ) : (
+                <p className="text-xl font-semibold text-[var(--npt-text)]">{amount}</p>
+              )}
+            </div>
+
+            {/* Fee */}
+            <div>
+              <label className="block text-xs text-[var(--npt-muted)] mb-1 font-medium">Fee (NPT)</label>
+              {step === "form" ? (
+                <input
+                  type="number"
+                  step="any"
+                  value={fee}
+                  onChange={(e) => setFee(e.target.value)}
+                  className="w-full px-3 py-3 rounded-xl bg-white border border-[var(--npt-border)] text-[var(--npt-text)] focus:outline-none focus:border-[var(--npt-blue)]"
+                />
+              ) : (
+                <p className="text-[var(--npt-text)]">{fee}</p>
+              )}
+            </div>
+
+            {pendingBlocked && step === "form" && (
+              <div className="p-3 rounded-xl bg-red-50 border border-red-200">
+                <p className="text-sm text-[var(--npt-error)] font-semibold">Sending blocked</p>
+                <p className="text-xs text-[var(--npt-error)]/80 mt-1">
                   A previous transaction is waiting to be mined.
-                  Sync your wallet to check if it has been confirmed.
                 </p>
               </div>
             )}
 
-            <div className="p-3 rounded-lg bg-[var(--npt-card)] border border-[var(--npt-border)] space-y-1">
-              <div className="flex justify-between text-xs">
-                <span className="text-[var(--npt-muted)]">Available</span>
-                <span>{effectiveBalance.toFixed(2)} NPT</span>
+            {/* Building animation overlay */}
+            {step === "building" && (
+              <div className="flex flex-col items-center py-6 gap-3">
+                <Clock size={48} className="text-[var(--npt-warning)]" />
+                <div className="flex gap-2">
+                  {[0, 1, 2, 3].map((i) => (
+                    <div
+                      key={i}
+                      className="w-2.5 h-2.5 rounded-full bg-[var(--npt-blue)]"
+                      style={{
+                        animation: `pulse-dot 1.4s ease-in-out ${i * 0.2}s infinite`,
+                      }}
+                    />
+                  ))}
+                </div>
+                <p className="text-sm text-[var(--npt-muted)]">{status}</p>
               </div>
-              {pendingOutgoing > 0 && (
-                <div className="flex justify-between text-xs">
-                  <span className="text-[var(--npt-muted)]">Pending outgoing</span>
-                  <span className="text-yellow-400">-{pendingOutgoing.toFixed(2)} NPT</span>
-                </div>
-              )}
-              {amountNum > 0 && (
-                <div className="flex justify-between text-xs">
-                  <span className="text-[var(--npt-muted)]">Total (amount + fee)</span>
-                  <span className={totalNeeded > availableBalance ? "text-red-400" : ""}>
-                    {totalNeeded.toFixed(2)} NPT
-                  </span>
-                </div>
-              )}
-              {totalNeeded > availableBalance && amountNum > 0 && (
-                <p className="text-xs text-red-400">Insufficient balance</p>
-              )}
-            </div>
-
-            {status && (
-              <p className="text-sm text-[var(--npt-blue)] text-center animate-pulse">{status}</p>
             )}
 
-            <button onClick={handleNext} disabled={!canSend}
-              className="w-full py-3 rounded-lg bg-[var(--npt-blue)] text-white font-semibold disabled:opacity-30 active:opacity-80 transition-opacity">
-              {loading ? "Processing..." : "Next"}
-            </button>
-          </>
-        )}
-
-        {step === "confirm" && (
-          <div className="space-y-4 pt-4">
-            <div className="p-4 rounded-lg bg-[var(--npt-card)] border border-[var(--npt-border)] space-y-2">
-              <h2 className="text-sm font-semibold">Confirm Transaction</h2>
-              <div className="flex justify-between text-sm">
-                <span className="text-[var(--npt-muted)]">Amount</span>
-                <span>{amount} NPT</span>
+            {/* Info card */}
+            <div className={`flex items-start gap-2 p-3 rounded-xl border ${
+              insufficientBalance
+                ? "bg-red-50 border-red-200"
+                : "bg-blue-50 border-blue-100"
+            }`}>
+              <div className="mt-0.5">
+                {insufficientBalance ? (
+                  <AlertCircle size={16} className="text-[var(--npt-error)]" />
+                ) : (
+                  <Info size={16} className="text-[var(--npt-blue)]" />
+                )}
               </div>
-              <div className="flex justify-between text-sm">
-                <span className="text-[var(--npt-muted)]">Fee</span>
-                <span>{fee} NPT</span>
-              </div>
-              <div className="flex justify-between text-sm">
-                <span className="text-[var(--npt-muted)]">To</span>
-                <span className="text-xs font-mono">{address.slice(0, 12)}...</span>
+              <div className="flex-1 space-y-0.5">
+                <div className="flex justify-between text-xs">
+                  <span className="text-[var(--npt-muted)]">Available :</span>
+                  <span className={insufficientBalance ? "text-[var(--npt-error)] font-semibold" : "text-[var(--npt-blue)] font-semibold"}>
+                    {effectiveBalance.toFixed(6)} NPT
+                  </span>
+                </div>
+                {amountNum > 0 && (
+                  <div className="flex justify-between text-xs">
+                    <span className="text-[var(--npt-muted)]">Total(amount+fee) :</span>
+                    <span className={insufficientBalance ? "text-[var(--npt-error)] font-semibold" : "text-[var(--npt-blue)] font-semibold"}>
+                      {totalNeeded.toFixed(6)} NPT
+                    </span>
+                  </div>
+                )}
               </div>
             </div>
 
-            <div className="p-3 rounded-lg bg-yellow-500/10 border border-yellow-500/30">
-              <p className="text-xs text-yellow-400">
-                Proof generation may take several minutes. Don't close the app.
-              </p>
-            </div>
+            {/* Confirm password sheet */}
+            {step === "confirm" && (
+              <div className="animate-slide-up bg-blue-50 rounded-xl p-4 space-y-3">
+                <label className="block text-sm font-medium text-[var(--npt-text)]">Confirm password</label>
+                <div className="flex items-center bg-white rounded-full border border-[var(--npt-border)] px-4">
+                  <input
+                    type={showPin ? "text" : "password"}
+                    value={pin}
+                    autoFocus
+                    onChange={(e) => setPin(e.target.value)}
+                    onKeyDown={(e) => e.key === "Enter" && handleSend()}
+                    className="flex-1 py-2.5 bg-transparent text-[var(--npt-text)] focus:outline-none"
+                  />
+                  <button onClick={() => setShowPin(!showPin)} className="text-[var(--npt-muted)]">
+                    {showPin ? <EyeOff size={18} /> : <Eye size={18} />}
+                  </button>
+                </div>
+                <button
+                  onClick={handleSend}
+                  disabled={!pin || loading}
+                  className="w-full py-3 rounded-full bg-[var(--npt-blue)] text-white font-semibold disabled:opacity-50 active:opacity-90"
+                >
+                  Send
+                </button>
+              </div>
+            )}
 
-            <input type="password" placeholder="Enter password to confirm"
-              value={pin} autoFocus
-              onChange={(e) => setPin(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && handleSend()}
-              className="w-full px-3 py-3 rounded-lg bg-[var(--npt-card)] border border-[var(--npt-border)] text-[var(--npt-text)] text-center text-2xl focus:outline-none focus:border-[var(--npt-blue)]" />
-
-            <div className="flex gap-3">
-              <button onClick={() => { setStep("form"); setPin(""); }}
-                className="flex-1 py-3 rounded-lg border border-[var(--npt-border)] text-[var(--npt-muted)] font-semibold">
-                Back
+            {/* Continue button */}
+            {step === "form" && (
+              <button
+                onClick={handleNext}
+                disabled={!canSend}
+                className="w-full py-3.5 rounded-full bg-[var(--npt-blue)] text-white font-semibold disabled:opacity-30 active:opacity-90 transition-opacity"
+              >
+                Continue
               </button>
-              <button onClick={handleSend} disabled={!pin || loading}
-                className="flex-1 py-3 rounded-lg bg-[var(--npt-blue)] text-white font-semibold disabled:opacity-50">
-                {loading ? "Sending..." : "Confirm & Send"}
-              </button>
-            </div>
+            )}
           </div>
         )}
       </div>
-      <NavBar />
     </div>
   );
 }
