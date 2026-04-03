@@ -144,14 +144,14 @@ export default function SeedCreateScreen() {
         {step === "password" && (
           <div className="animate-fade-in">
             {/* Top logo section - #EDF1F9 bg */}
-            <div className="bg-[var(--npt-logo-bg)] flex flex-row items-center pb-6 pt-4">
+            <div className="bg-[var(--npt-logo-bg)] flex flex-row items-center justify-center pb-6 pt-4">
               <NeptuneLogo size={48} />
               <span className="text-xl font-bold text-[var(--npt-text)] mt-2">neptune</span>
             </div>
 
             {/* White password section */}
             <div className="bg-white px-6 pt-6 pb-4 space-y-6">
-              <h2 className="text-lg font-bold text-[var(--npt-text)]">Password</h2>
+              <h2 className="text-lg font-bold text-center  text-[var(--npt-text)]">Password</h2>
 
               <div className="space-y-5">
                 {/* New password */}
@@ -224,10 +224,12 @@ export default function SeedCreateScreen() {
         {/* Words step */}
         {step === "words" && (
           <div className="px-6 pt-4 space-y-4 animate-fade-in">
-            <div className="flex items-start gap-2 p-3 rounded-xl bg-[var(--npt-logo-bg)]">
-              <span className="text-base leading-none mt-0.5">&#9888;</span>
-              <p className="text-xs text-[var(--npt-text)] leading-relaxed">
-                Write down these 18 words in order. Never share them. Anyone with these words can steal your funds.
+            <div className="flex items-center gap-3 px-4 py-3 rounded-full bg-[var(--npt-error)] shadow-md">
+              <div className="w-5 h-5 rounded-full bg-white/20 flex items-center justify-center shrink-0">
+                <span className="text-white text-xs font-bold">!</span>
+              </div>
+              <p className="text-sm text-white font-medium">
+                Never share your seed phrase!
               </p>
             </div>
             <div className="grid grid-cols-3 gap-2">
