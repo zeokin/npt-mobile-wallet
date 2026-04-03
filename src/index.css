@@ -48,6 +48,16 @@ input, textarea {
   font-family: inherit;
 }
 
+/* Hide browser's native password reveal button (Edge/Chrome on Windows) */
+input::-ms-reveal,
+input::-ms-clear {
+  display: none;
+}
+input::-webkit-credentials-auto-fill-button,
+input::-webkit-textfield-decoration-container {
+  display: none;
+}
+
 /* Scrollbar styling */
 ::-webkit-scrollbar {
   width: 3px;

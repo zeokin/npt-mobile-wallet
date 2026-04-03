@@ -144,7 +144,7 @@ export default function SeedCreateScreen() {
         {step === "password" && (
           <div className="animate-fade-in">
             {/* Top logo section - #EDF1F9 bg */}
-            <div className="bg-[var(--npt-logo-bg)] flex flex-col items-center pb-6 pt-4">
+            <div className="bg-[var(--npt-logo-bg)] flex flex-row items-center pb-6 pt-4">
               <NeptuneLogo size={48} />
               <span className="text-xl font-bold text-[var(--npt-text)] mt-2">neptune</span>
             </div>
@@ -224,10 +224,10 @@ export default function SeedCreateScreen() {
         {/* Words step */}
         {step === "words" && (
           <div className="px-6 pt-4 space-y-4 animate-fade-in">
-            <div className="bg-red-50 border border-red-200 rounded-xl p-3">
-              <p className="text-xs text-[var(--npt-error)]">
-                Write down these 18 words in order. Never share them. Anyone with these words can
-                steal your funds.
+            <div className="flex items-start gap-2 p-3 rounded-xl bg-[var(--npt-logo-bg)]">
+              <span className="text-base leading-none mt-0.5">&#9888;</span>
+              <p className="text-xs text-[var(--npt-text)] leading-relaxed">
+                Write down these 18 words in order. Never share them. Anyone with these words can steal your funds.
               </p>
             </div>
             <div className="grid grid-cols-3 gap-2">
