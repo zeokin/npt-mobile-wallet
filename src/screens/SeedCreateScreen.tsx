@@ -127,9 +127,9 @@ export default function SeedCreateScreen() {
   const isCorrect = selectedAnswer === correctWord;
 
   return (
-    <div className="flex flex-col h-full bg-white safe-top safe-bottom">
+    <div className="flex flex-col h-full bg-[var(--npt-logo-bg)] safe-top safe-bottom">
       {/* Header */}
-      <div className="flex items-center px-4 py-3 bg-[var(--npt-logo-bg)]">
+      <div className="flex items-center  px-4 py-3">
         <button
           onClick={step === "password" ? handleCancel : handleBackToWords}
           className="p-1 text-[var(--npt-text)]"
@@ -142,21 +142,21 @@ export default function SeedCreateScreen() {
       <div className="flex-1 overflow-y-auto">
         {/* Password step */}
         {step === "password" && (
-          <div className="animate-fade-in">
+          <div className="animate-fade-in h-full fiex flex-col">
             {/* Top logo section - #EDF1F9 bg */}
-            <div className="bg-[var(--npt-logo-bg)] flex flex-row items-center justify-center pb-6 pt-4">
-              <NeptuneLogo size={48} />
-              <span className="text-xl font-bold text-[var(--npt-text)] mt-2">neptune</span>
+            <div className="h-1/3 bg-[var(--npt-logo-bg)] flex flex-row items-center justify-center gap-2 pb-6 pt-4">
+              <NeptuneLogo size={60} />
+              <span className="text-4xl font-bold text-[var(--npt-text)] mt-2">neptune</span>
             </div>
 
             {/* White password section */}
-            <div className="bg-white px-6 pt-6 pb-4 space-y-6">
-              <h2 className="text-lg font-bold text-center  text-[var(--npt-text)]">Password</h2>
+            <div className="h-2/3 bg-white px-6 pt-6 pb-4 flex flex-col space-y-6 rounded-t-lg">
+              <h2 className="h-1/5 flex text-lg text-center font-bold flex-col justify-center item-center text-[var(--npt-muted)]">Create new Password</h2>
 
-              <div className="space-y-5">
+              <div className="h-4/5 flex space-y-5 flex-col gap-6">
                 {/* New password */}
                 <div>
-                  <label className="block text-xs text-[var(--npt-muted)] mb-1">New password</label>
+                  <label className="block text-xs text-[var(--npt-muted)] mb-1">Enter new password</label>
                   <div className="flex items-center border-b border-[var(--npt-border)]">
                     <input
                       type={showPin ? "text" : "password"}
@@ -208,7 +208,7 @@ export default function SeedCreateScreen() {
                     </button>
                   </div>
                 </div>
-              </div>
+              
 
               <button
                 onClick={handleCreateWallet}
@@ -217,139 +217,160 @@ export default function SeedCreateScreen() {
               >
                 {loading ? "Creating..." : "Continue"}
               </button>
+              </div>
             </div>
           </div>
         )}
 
         {/* Words step */}
         {step === "words" && (
-          <div className="px-6 pt-4 space-y-4 animate-fade-in">
-            <div className="flex items-center gap-3 px-4 py-3 rounded-full bg-[var(--npt-error)] shadow-md">
-              <div className="w-5 h-5 rounded-full bg-white/20 flex items-center justify-center shrink-0">
-                <span className="text-white text-xs font-bold">!</span>
-              </div>
-              <p className="text-sm text-white font-medium">
-                Never share your seed phrase!
-              </p>
-            </div>
-            <div className="grid grid-cols-3 gap-2">
-              {words.map((word, i) => (
-                <div
-                  key={i}
-                  className="flex items-center gap-1.5 bg-white rounded-lg p-2 border border-[var(--npt-border)]"
-                >
-                  <span className="text-xs text-[var(--npt-muted)] w-5 text-right font-medium">
-                    {i + 1}.
-                  </span>
-                  <span className="text-sm font-mono text-[var(--npt-text)]">{word}</span>
+          <div className="animate-fade-in h-full flex flex-col">
+            {/* Top notification area */}
+            <div className="bg-[var(--npt-logo-bg)] flex flex-col items-center px-6 pt-4 pb-6">
+              <div className="flex items-center gap-3 px-4 py-3 rounded-full bg-[var(--npt-error)] shadow-md">
+                <div className="w-5 h-5 rounded-full bg-white/20 flex items-center justify-center shrink-0">
+                  <span className="text-white text-xs font-bold">!</span>
                 </div>
-              ))}
+                <p className="text-sm text-white font-medium">
+                  Never share your seed phrase!
+                </p>
+              </div>
             </div>
-            <button
-              onClick={() => setStep("verify")}
-              className="w-full py-3.5 rounded-full bg-[var(--npt-blue)] text-white font-semibold active:opacity-90"
-            >
-              I've Written Them Down
-            </button>
-            <button
-              onClick={handleCancel}
-              className="w-full py-2 text-sm text-[var(--npt-muted)]"
-            >
-              Cancel
-            </button>
+
+            {/* White section */}
+            <div className="flex-1 bg-white px-6 pt-5 pb-4 rounded-t-lg flex flex-col">
+              <div className="flex-1 overflow-y-auto">
+                <div className="grid grid-cols-3 gap-2">
+                  {words.map((word, i) => (
+                    <div
+                      key={i}
+                      className="flex items-center gap-1.5 bg-[var(--npt-logo-bg)] rounded-lg p-2"
+                    >
+                      <span className="text-xs text-[var(--npt-muted)] w-5 text-right font-medium">
+                        {i + 1}.
+                      </span>
+                      <span className="text-sm font-mono text-[var(--npt-text)]">{word}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="pt-4 space-y-2">
+                <button
+                  onClick={() => setStep("verify")}
+                  className="w-full py-3.5 rounded-full bg-[var(--npt-blue)] text-white font-semibold active:opacity-90"
+                >
+                  I've Written Them Down
+                </button>
+                <button
+                  onClick={handleCancel}
+                  className="w-full py-2 text-sm text-[var(--npt-muted)]"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
           </div>
         )}
 
         {/* Verify step */}
         {step === "verify" && currentWordPos !== undefined && (
-          <div className="px-6 pt-4 space-y-4 animate-fade-in">
-            {/* Progress dots */}
-            <div className="flex items-center justify-center gap-2">
-              {Array.from({ length: TOTAL_QUESTIONS }).map((_, i) => (
-                <div
-                  key={i}
-                  className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold ${
-                    i < quizIndex
-                      ? "bg-[var(--npt-success)] text-white"
-                      : i === quizIndex
-                      ? "border-2 border-[var(--npt-blue)] text-[var(--npt-blue)]"
-                      : "bg-[var(--npt-border)] text-[var(--npt-muted)]"
-                  }`}
-                >
-                  {i < quizIndex ? "\u2713" : i + 1}
-                </div>
-              ))}
-            </div>
-
-            <p className="text-sm text-[var(--npt-muted)] text-center">
-              Question {quizIndex + 1} of {TOTAL_QUESTIONS}: What is word{" "}
-              <span className="text-[var(--npt-blue)] font-bold">#{currentWordPos + 1}</span>?
-            </p>
-
-            <div className="grid grid-cols-1 gap-2">
-              {quizOptions.map((option, i) => {
-                let style = "border-[var(--npt-border)] bg-white";
-                if (showResult && option === correctWord) {
-                  style = "border-[var(--npt-success)] bg-green-50";
-                } else if (showResult && selectedAnswer === option && !isCorrect) {
-                  style = "border-[var(--npt-error)] bg-red-50";
-                } else if (!showResult && selectedAnswer === option) {
-                  style = "border-[var(--npt-blue)] bg-blue-50";
-                }
-
-                return (
-                  <button
+          <div className="animate-fade-in h-full flex flex-col">
+            {/* Top area with progress dots */}
+            <div className="bg-[var(--npt-logo-bg)] flex flex-col items-center px-6 pt-4 pb-6">
+              <h2 className="text-lg font-bold text-[var(--npt-muted)] mb-4">Verify Backup</h2>
+              <div className="flex items-center justify-center gap-2">
+                {Array.from({ length: TOTAL_QUESTIONS }).map((_, i) => (
+                  <div
                     key={i}
-                    onClick={() => handleSelectAnswer(option)}
-                    disabled={showResult}
-                    className={`w-full px-4 py-3 rounded-xl border-2 text-left font-medium transition-all disabled:cursor-default ${style}`}
+                    className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold ${
+                      i < quizIndex
+                        ? "bg-[var(--npt-success)] text-white"
+                        : i === quizIndex
+                        ? "border-2 border-[var(--npt-blue)] text-[var(--npt-blue)]"
+                        : "bg-[var(--npt-border)] text-[var(--npt-muted)]"
+                    }`}
                   >
-                    <span className="text-[var(--npt-muted)] mr-2">
-                      {String.fromCharCode(65 + i)}.
-                    </span>
-                    <span className="text-[var(--npt-text)]">{option}</span>
-                  </button>
-                );
-              })}
+                    {i < quizIndex ? "\u2713" : i + 1}
+                  </div>
+                ))}
+              </div>
             </div>
 
-            {showResult && (
-              <div
-                className={`p-3 rounded-xl text-center text-sm font-medium ${
-                  isCorrect
-                    ? "bg-green-50 border border-green-200 text-[var(--npt-success)]"
-                    : "bg-red-50 border border-red-200 text-[var(--npt-error)]"
-                }`}
-              >
-                {isCorrect
-                  ? quizIndex + 1 >= TOTAL_QUESTIONS
-                    ? "All correct! Your backup is verified."
-                    : "Correct! Next question..."
-                  : "Wrong answer. Try again."}
-              </div>
-            )}
+            {/* White section */}
+            <div className="flex-1 bg-white px-6 pt-5 pb-4 rounded-t-lg flex flex-col">
+              <div className="flex-1 space-y-4">
+                <p className="text-sm text-[var(--npt-muted)] text-center">
+                  Question {quizIndex + 1} of {TOTAL_QUESTIONS}: What is word{" "}
+                  <span className="text-[var(--npt-blue)] font-bold">#{currentWordPos + 1}</span>?
+                </p>
 
-            <div className="flex gap-3">
-              {(!showResult || !isCorrect) && (
-                <button
-                  onClick={handleBackToWords}
-                  className="flex-1 py-3 rounded-full border border-[var(--npt-border)] text-[var(--npt-muted)] font-semibold"
-                >
-                  Back
-                </button>
-              )}
-              {showResult && (
-                <button
-                  onClick={handleQuizNext}
-                  className="flex-1 py-3 rounded-full bg-[var(--npt-blue)] text-white font-semibold"
-                >
-                  {isCorrect
-                    ? quizIndex + 1 >= TOTAL_QUESTIONS
-                      ? "Continue"
-                      : "Next Question"
-                    : "Try Again"}
-                </button>
-              )}
+                <div className="grid grid-cols-1 gap-2">
+                  {quizOptions.map((option, i) => {
+                    let style = "border-[var(--npt-border)] bg-[var(--npt-logo-bg)]";
+                    if (showResult && option === correctWord) {
+                      style = "border-[var(--npt-success)] bg-green-50";
+                    } else if (showResult && selectedAnswer === option && !isCorrect) {
+                      style = "border-[var(--npt-error)] bg-red-50";
+                    } else if (!showResult && selectedAnswer === option) {
+                      style = "border-[var(--npt-blue)] bg-blue-50";
+                    }
+
+                    return (
+                      <button
+                        key={i}
+                        onClick={() => handleSelectAnswer(option)}
+                        disabled={showResult}
+                        className={`w-full px-4 py-3 rounded-xl border-2 text-left font-medium transition-all disabled:cursor-default ${style}`}
+                      >
+                        <span className="text-[var(--npt-muted)] mr-2">
+                          {String.fromCharCode(65 + i)}.
+                        </span>
+                        <span className="text-[var(--npt-text)]">{option}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {showResult && (
+                  <div
+                    className={`p-3 rounded-xl text-center text-sm font-medium ${
+                      isCorrect
+                        ? "bg-green-50 border border-green-200 text-[var(--npt-success)]"
+                        : "bg-red-50 border border-red-200 text-[var(--npt-error)]"
+                    }`}
+                  >
+                    {isCorrect
+                      ? quizIndex + 1 >= TOTAL_QUESTIONS
+                        ? "All correct! Your backup is verified."
+                        : "Correct! Next question..."
+                      : "Wrong answer. Try again."}
+                  </div>
+                )}
+              </div>
+
+              <div className="pt-4 flex gap-3">
+                {(!showResult || !isCorrect) && (
+                  <button
+                    onClick={handleBackToWords}
+                    className="flex-1 py-3 rounded-full border border-[var(--npt-border)] text-[var(--npt-muted)] font-semibold"
+                  >
+                    Back
+                  </button>
+                )}
+                {showResult && (
+                  <button
+                    onClick={handleQuizNext}
+                    className="flex-1 py-3 rounded-full bg-[var(--npt-blue)] text-white font-semibold"
+                  >
+                    {isCorrect
+                      ? quizIndex + 1 >= TOTAL_QUESTIONS
+                        ? "Continue"
+                        : "Next Question"
+                      : "Try Again"}
+                  </button>
+                )}
+              </div>
             </div>
           </div>
         )}
