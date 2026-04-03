@@ -1,18 +1,19 @@
 @import "tailwindcss";
 
 :root {
-  --npt-blue: #2D7CF6;
-  --npt-blue-dark: #1B6AE5;
+  --npt-blue: #347AF0;
+  --npt-blue-dark: #2A68D0;
   --npt-bg: #F8F9FD;
+  --npt-logo-bg: #EDF1F9;
   --npt-white: #FFFFFF;
   --npt-card: #FFFFFF;
   --npt-border: #E8ECF4;
   --npt-text: #1A1D26;
   --npt-muted: #8E92A3;
-  --npt-success: #34C759;
-  --npt-error: #FF3B30;
-  --npt-warning: #FF9500;
-  --npt-pending: #FFB800;
+  --npt-success: #75BF72;
+  --npt-error: #DF5060;
+  --npt-warning: #FDB32A;
+  --npt-pending: #FDB32A;
 
   --safe-top: env(safe-area-inset-top, 0px);
   --safe-bottom: env(safe-area-inset-bottom, 0px);

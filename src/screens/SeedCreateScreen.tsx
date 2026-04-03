@@ -16,6 +16,21 @@ function pickRandom(max: number, count: number, exclude?: number): number[] {
   return indices;
 }
 
+function getPasswordStrength(pw: string): { label: string; color: string; width: string } {
+  if (pw.length === 0) return { label: "", color: "", width: "0%" };
+  let score = 0;
+  if (pw.length >= 8) score++;
+  if (pw.length >= 12) score++;
+  if (/[a-z]/.test(pw) && /[A-Z]/.test(pw)) score++;
+  if (/\d/.test(pw)) score++;
+  if (/[^a-zA-Z0-9]/.test(pw)) score++;
+
+  if (score <= 1) return { label: "Weak", color: "var(--npt-error)", width: "25%" };
+  if (score <= 2) return { label: "Fair", color: "var(--npt-warning)", width: "50%" };
+  if (score <= 3) return { label: "Good", color: "var(--npt-blue)", width: "75%" };
+  return { label: "Strong", color: "var(--npt-success)", width: "100%" };
+}
+
 export default function SeedCreateScreen() {
   const navigate = useNavigate();
 
@@ -42,6 +57,8 @@ export default function SeedCreateScreen() {
     const options = [correct, ...others];
     return options.sort(() => correct.charCodeAt(0) + others.length - 150);
   }, [words, quizPositions, quizIndex]);
+
+  const strength = getPasswordStrength(pin);
 
   const handleCreateWallet = async () => {
     if (pin.length < 8) {
@@ -110,9 +127,9 @@ export default function SeedCreateScreen() {
   const isCorrect = selectedAnswer === correctWord;
 
   return (
-    <div className="flex flex-col h-full bg-[var(--npt-bg)] safe-top safe-bottom">
+    <div className="flex flex-col h-full bg-white safe-top safe-bottom">
       {/* Header */}
-      <div className="flex items-center px-4 py-3">
+      <div className="flex items-center px-4 py-3 bg-[var(--npt-logo-bg)]">
         <button
           onClick={step === "password" ? handleCancel : handleBackToWords}
           className="p-1 text-[var(--npt-text)]"
@@ -125,69 +142,82 @@ export default function SeedCreateScreen() {
       <div className="flex-1 overflow-y-auto">
         {/* Password step */}
         {step === "password" && (
-          <div className="px-6 pt-4 space-y-6 animate-fade-in">
-            {/* Logo */}
-            <div className="flex items-center justify-center gap-2">
-              <NeptuneLogo size={32} />
-              <span className="text-xl font-bold text-[var(--npt-text)]">neptune</span>
+          <div className="animate-fade-in">
+            {/* Top logo section - #EDF1F9 bg */}
+            <div className="bg-[var(--npt-logo-bg)] flex flex-col items-center pb-6 pt-4">
+              <NeptuneLogo size={48} />
+              <span className="text-xl font-bold text-[var(--npt-text)] mt-2">neptune</span>
             </div>
 
-            {/* Password form */}
-            <div className="space-y-1">
+            {/* White password section */}
+            <div className="bg-white px-6 pt-6 pb-4 space-y-6">
               <h2 className="text-lg font-bold text-[var(--npt-text)]">Password</h2>
-              <p className="text-sm text-[var(--npt-muted)]">
-                Your new password must be different from a previously used password
-              </p>
-            </div>
 
-            <div className="space-y-5">
-              {/* New password */}
-              <div>
-                <label className="block text-xs text-[var(--npt-muted)] mb-1">New password</label>
-                <div className="flex items-center border-b border-[var(--npt-border)]">
-                  <input
-                    type={showPin ? "text" : "password"}
-                    value={pin}
-                    onChange={(e) => setPin(e.target.value)}
-                    className="flex-1 bg-transparent py-2.5 text-[var(--npt-text)] focus:outline-none"
-                  />
-                  <button
-                    onClick={() => setShowPin(!showPin)}
-                    className="p-1.5 text-[var(--npt-muted)]"
-                  >
-                    {showPin ? <EyeOff size={18} /> : <Eye size={18} />}
-                  </button>
+              <div className="space-y-5">
+                {/* New password */}
+                <div>
+                  <label className="block text-xs text-[var(--npt-muted)] mb-1">New password</label>
+                  <div className="flex items-center border-b border-[var(--npt-border)]">
+                    <input
+                      type={showPin ? "text" : "password"}
+                      value={pin}
+                      onChange={(e) => setPin(e.target.value)}
+                      className="flex-1 bg-transparent py-2.5 text-[var(--npt-text)] focus:outline-none"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPin(!showPin)}
+                      className="p-1.5 text-[var(--npt-muted)]"
+                    >
+                      {showPin ? <EyeOff size={18} /> : <Eye size={18} />}
+                    </button>
+                  </div>
+                  {/* Strength indicator */}
+                  {pin.length > 0 && (
+                    <div className="mt-2">
+                      <div className="h-1 bg-[var(--npt-border)] rounded-full overflow-hidden">
+                        <div
+                          className="h-full rounded-full transition-all duration-300"
+                          style={{ width: strength.width, backgroundColor: strength.color }}
+                        />
+                      </div>
+                      <p className="text-xs mt-1" style={{ color: strength.color }}>
+                        {strength.label}
+                      </p>
+                    </div>
+                  )}
+                </div>
+
+                {/* Repeat password */}
+                <div>
+                  <label className="block text-xs text-[var(--npt-muted)] mb-1">Repeat password</label>
+                  <div className="flex items-center border-b border-[var(--npt-border)]">
+                    <input
+                      type={showConfirm ? "text" : "password"}
+                      value={confirmPin}
+                      onChange={(e) => setConfirmPin(e.target.value)}
+                      onKeyDown={(e) => e.key === "Enter" && handleCreateWallet()}
+                      className="flex-1 bg-transparent py-2.5 text-[var(--npt-text)] focus:outline-none"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowConfirm(!showConfirm)}
+                      className="p-1.5 text-[var(--npt-muted)]"
+                    >
+                      {showConfirm ? <EyeOff size={18} /> : <Eye size={18} />}
+                    </button>
+                  </div>
                 </div>
               </div>
 
-              {/* Repeat password */}
-              <div>
-                <label className="block text-xs text-[var(--npt-muted)] mb-1">Repeat password</label>
-                <div className="flex items-center border-b border-[var(--npt-border)]">
-                  <input
-                    type={showConfirm ? "text" : "password"}
-                    value={confirmPin}
-                    onChange={(e) => setConfirmPin(e.target.value)}
-                    onKeyDown={(e) => e.key === "Enter" && handleCreateWallet()}
-                    className="flex-1 bg-transparent py-2.5 text-[var(--npt-text)] focus:outline-none"
-                  />
-                  <button
-                    onClick={() => setShowConfirm(!showConfirm)}
-                    className="p-1.5 text-[var(--npt-muted)]"
-                  >
-                    {showConfirm ? <EyeOff size={18} /> : <Eye size={18} />}
-                  </button>
-                </div>
-              </div>
+              <button
+                onClick={handleCreateWallet}
+                disabled={loading}
+                className="w-full py-3.5 rounded-full bg-[var(--npt-blue)] text-white font-semibold disabled:opacity-50 active:opacity-90 transition-opacity"
+              >
+                {loading ? "Creating..." : "Continue"}
+              </button>
             </div>
-
-            <button
-              onClick={handleCreateWallet}
-              disabled={loading}
-              className="w-full py-3.5 rounded-full bg-[var(--npt-blue)] text-white font-semibold disabled:opacity-50 active:opacity-90 transition-opacity"
-            >
-              {loading ? "Creating..." : "Continue"}
-            </button>
           </div>
         )}
 
