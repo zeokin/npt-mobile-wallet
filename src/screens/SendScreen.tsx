@@ -264,7 +264,7 @@ export default function SendScreen() {
               <button
                 onClick={handleNext}
                 disabled={!canSend}
-                className="w-full py-3.5 rounded-full bg-[var(--npt-blue)] text-white font-semibold disabled:opacity-30 active:opacity-90 transition-opacity"
+                className="w-1/2 py-1 px-2 rounded-full bg-[var(--npt-blue)] text-white font-semibold disabled:opacity-30 active:opacity-90 transition-opacity"
               >
                 Continue
               </button>

@@ -1,5 +1,5 @@
 @import "tailwindcss";
-
+@source "../src/**/*.{tsx,ts}";
 :root {
   --npt-blue: #347AF0;
   --npt-blue-dark: #2A68D0;
@@ -8,8 +8,9 @@
   --npt-white: #FFFFFF;
   --npt-card: #FFFFFF;
   --npt-border: #E8ECF4;
-  --npt-text: #1A1D26;
+  --npt-text: #0D1F3C;
   --npt-muted: #8E92A3;
+  --npt-strong-muted: #979797;
   --npt-success: #75BF72;
   --npt-error: #DF5060;
   --npt-warning: #FDB32A;
@@ -21,9 +22,9 @@
   --safe-right: env(safe-area-inset-right, 0px);
 }
 
-* {
-  margin: 0;
-  padding: 0;
+*,
+*::before,
+*::after {
   box-sizing: border-box;
 }
 

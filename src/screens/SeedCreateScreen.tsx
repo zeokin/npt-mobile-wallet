@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import { ChevronLeft, Eye, EyeOff } from "lucide-react";
 import { createWallet, deleteWallet } from "../api/rpc";
 import NeptuneLogo from "../components/ui/NeptuneLogo";
+import NeptuneText from "../components/ui/NeptuneText";
 
 const TOTAL_QUESTIONS = 3;
 
@@ -127,54 +128,54 @@ export default function SeedCreateScreen() {
   const isCorrect = selectedAnswer === correctWord;
 
   return (
-    <div className="flex flex-col h-full bg-white safe-top safe-bottom">
+    <div className="flex flex-col h-full bg-[var(--npt-logo-bg)] safe-top safe-bottom">
       {/* Header */}
-      <div className="flex items-center px-4 py-3 bg-[var(--npt-logo-bg)]">
+      <div className="flex items-center  px-2 py-2">
         <button
           onClick={step === "password" ? handleCancel : handleBackToWords}
-          className="p-1 text-[var(--npt-text)]"
+          className="text-[var(--npt-text)]"
         >
           <ChevronLeft size={24} />
         </button>
-        <h1 className="flex-1 text-center text-lg font-semibold pr-8">Create New Wallet</h1>
+        <h1 className="flex-1 text-center text-lg font-semibold pr-4">Create New Wallet</h1>
       </div>
 
       <div className="flex-1 overflow-y-auto">
         {/* Password step */}
         {step === "password" && (
-          <div className="animate-fade-in">
+          <div className="animate-fade-in h-full fiex flex-col">
             {/* Top logo section - #EDF1F9 bg */}
-            <div className="bg-[var(--npt-logo-bg)] flex flex-row items-center justify-center pb-6 pt-4">
-              <NeptuneLogo size={48} />
-              <span className="text-xl font-bold text-[var(--npt-text)] mt-2">neptune</span>
+            <div className="h-1/4 bg-[var(--npt-logo-bg)] flex flex-row items-center justify-center gap-2 pb-6 pt-4">
+              <NeptuneLogo size={56} />
+              <NeptuneText size={120} />
             </div>
 
             {/* White password section */}
-            <div className="bg-white px-6 pt-6 pb-4 space-y-6">
-              <h2 className="text-lg font-bold text-center  text-[var(--npt-text)]">Password</h2>
+            <div className="h-3/4 bg-white shadow-2xl shadow-black px-4 pb-4 flex flex-col rounded-t-3xl">
+              <h2 className="h-1/6 flex text-lg text-center font-bold flex-col justify-center item-center text-[var(--npt-muted)]">Create new Password</h2>
 
-              <div className="space-y-5">
+              <div className="h-5/6 flex space-y-5 flex-col gap-1">
                 {/* New password */}
                 <div>
-                  <label className="block text-xs text-[var(--npt-muted)] mb-1">New password</label>
+                  <label className="block text-xs text-[var(--npt-muted)]">Enter new password</label>
                   <div className="flex items-center border-b border-[var(--npt-border)]">
                     <input
                       type={showPin ? "text" : "password"}
                       value={pin}
                       onChange={(e) => setPin(e.target.value)}
-                      className="flex-1 bg-transparent py-2.5 text-[var(--npt-text)] focus:outline-none"
+                      className="flex-1 bg-transparent py-1 text-[var(--npt-text)] focus:outline-none"
                     />
                     <button
                       type="button"
                       onClick={() => setShowPin(!showPin)}
-                      className="p-1.5 text-[var(--npt-muted)]"
+                      className="text-[var(--npt-muted)]"
                     >
                       {showPin ? <EyeOff size={18} /> : <Eye size={18} />}
                     </button>
                   </div>
                   {/* Strength indicator */}
                   {pin.length > 0 && (
-                    <div className="mt-2">
+                    <div className="dfs">
                       <div className="h-1 bg-[var(--npt-border)] rounded-full overflow-hidden">
                         <div
                           className="h-full rounded-full transition-all duration-300"
@@ -190,41 +191,44 @@ export default function SeedCreateScreen() {
 
                 {/* Repeat password */}
                 <div>
-                  <label className="block text-xs text-[var(--npt-muted)] mb-1">Repeat password</label>
+                  <label className="block text-xs text-[var(--npt-muted)]">Repeat password</label>
                   <div className="flex items-center border-b border-[var(--npt-border)]">
                     <input
                       type={showConfirm ? "text" : "password"}
                       value={confirmPin}
                       onChange={(e) => setConfirmPin(e.target.value)}
                       onKeyDown={(e) => e.key === "Enter" && handleCreateWallet()}
-                      className="flex-1 bg-transparent py-2.5 text-[var(--npt-text)] focus:outline-none"
+                      className="flex-1 bg-transparent py-1 text-[var(--npt-text)] focus:outline-none"
                     />
                     <button
                       type="button"
                       onClick={() => setShowConfirm(!showConfirm)}
-                      className="p-1.5 text-[var(--npt-muted)]"
+                      className="text-[var(--npt-muted)]"
                     >
                       {showConfirm ? <EyeOff size={18} /> : <Eye size={18} />}
                     </button>
                   </div>
                 </div>
-              </div>
+              
 
-              <button
+              <div className="flex justify-center">
+                <button
                 onClick={handleCreateWallet}
                 disabled={loading}
-                className="w-full py-3.5 rounded-full bg-[var(--npt-blue)] text-white font-semibold disabled:opacity-50 active:opacity-90 transition-opacity"
+                className="w-1/2 py-1 rounded-full bg-[var(--npt-blue)] text-white font-semibold disabled:opacity-50 active:opacity-90 transition-opacity"
               >
                 {loading ? "Creating..." : "Continue"}
               </button>
+              </div>
+              </div>
             </div>
           </div>
         )}
 
         {/* Words step */}
         {step === "words" && (
-          <div className="px-6 pt-4 space-y-4 animate-fade-in">
-            <div className="flex items-center gap-3 px-4 py-3 rounded-full bg-[var(--npt-error)] shadow-md">
+          <div className="flex flex-col gap-4 animate-fade-in">
+            <div className="flex justify-center gap-3 py-2 bg-[var(--npt-error)] shadow-md">
               <div className="w-5 h-5 rounded-full bg-white/20 flex items-center justify-center shrink-0">
                 <span className="text-white text-xs font-bold">!</span>
               </div>
@@ -232,7 +236,7 @@ export default function SeedCreateScreen() {
                 Never share your seed phrase!
               </p>
             </div>
-            <div className="grid grid-cols-3 gap-2">
+            <div className="grid grid-cols-3 gap-2 px-4">
               {words.map((word, i) => (
                 <div
                   key={i}
@@ -245,24 +249,26 @@ export default function SeedCreateScreen() {
                 </div>
               ))}
             </div>
-            <button
+            <div className="flex flex-col items-center gap-2">
+              <button
               onClick={() => setStep("verify")}
-              className="w-full py-3.5 rounded-full bg-[var(--npt-blue)] text-white font-semibold active:opacity-90"
+              className="w-2/3 py-1 rounded-full bg-[var(--npt-blue)] text-white font-semibold active:opacity-90"
             >
               I've Written Them Down
             </button>
             <button
               onClick={handleCancel}
-              className="w-full py-2 text-sm text-[var(--npt-muted)]"
+              className="w-2/3 py-1 rounded-full text-white text-sm bg-[var(--npt-strong-muted)]"
             >
               Cancel
             </button>
+            </div>
           </div>
         )}
 
         {/* Verify step */}
         {step === "verify" && currentWordPos !== undefined && (
-          <div className="px-6 pt-4 space-y-4 animate-fade-in">
+          <div className="px-2 space-y-4 animate-fade-in">
             {/* Progress dots */}
             <div className="flex items-center justify-center gap-2">
               {Array.from({ length: TOTAL_QUESTIONS }).map((_, i) => (
@@ -281,7 +287,7 @@ export default function SeedCreateScreen() {
               ))}
             </div>
 
-            <p className="text-sm text-[var(--npt-muted)] text-center">
+            <p className="text-sm text-[var(--npt-text)] text-center">
               Question {quizIndex + 1} of {TOTAL_QUESTIONS}: What is word{" "}
               <span className="text-[var(--npt-blue)] font-bold">#{currentWordPos + 1}</span>?
             </p>
@@ -315,12 +321,13 @@ export default function SeedCreateScreen() {
 
             {showResult && (
               <div
-                className={`p-3 rounded-xl text-center text-sm font-medium ${
+                className={`py-1 text-center text-sm font-medium ${
                   isCorrect
-                    ? "bg-green-50 border border-green-200 text-[var(--npt-success)]"
-                    : "bg-red-50 border border-red-200 text-[var(--npt-error)]"
+                    ? "bg-[var(--npt-success)] text-white"
+                    : "bg-[var(--npt-error)] text-white"
                 }`}
               >
+                
                 {isCorrect
                   ? quizIndex + 1 >= TOTAL_QUESTIONS
                     ? "All correct! Your backup is verified."
@@ -329,11 +336,11 @@ export default function SeedCreateScreen() {
               </div>
             )}
 
-            <div className="flex gap-3">
+            <div className="flex gap-2">
               {(!showResult || !isCorrect) && (
                 <button
                   onClick={handleBackToWords}
-                  className="flex-1 py-3 rounded-full border border-[var(--npt-border)] text-[var(--npt-muted)] font-semibold"
+                  className="flex-1 py-1 rounded-full border bg-[var(--npt-strong-muted)] text-white font-semibold"
                 >
                   Back
                 </button>
@@ -341,7 +348,7 @@ export default function SeedCreateScreen() {
               {showResult && (
                 <button
                   onClick={handleQuizNext}
-                  className="flex-1 py-3 rounded-full bg-[var(--npt-blue)] text-white font-semibold"
+                  className="flex-1 w-1/2 py-1 rounded-full bg-[var(--npt-blue)] text-white font-semibold"
                 >
                   {isCorrect
                     ? quizIndex + 1 >= TOTAL_QUESTIONS

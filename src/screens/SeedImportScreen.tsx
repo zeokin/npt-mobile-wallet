@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import { ChevronLeft, Eye, EyeOff } from "lucide-react";
 import { importWallet } from "../api/rpc";
 import NeptuneLogo from "../components/ui/NeptuneLogo";
+import NeptuneText from "../components/ui/NeptuneText";
 
 export default function SeedImportScreen() {
   const navigate = useNavigate();
@@ -50,30 +51,31 @@ export default function SeedImportScreen() {
   };
 
   return (
-    <div className="flex flex-col h-full bg-[var(--npt-bg)] safe-top safe-bottom">
+    <div className="flex flex-col h-full bg-[var(--npt-logo-bg)] safe-top safe-bottom">
       {/* Header */}
-      <div className="flex items-center px-4 py-3">
+      <div className="flex items-center px-2 py-2">
         <button
           onClick={() => step === "words" ? navigate("/", { replace: true }) : setStep("words")}
           className="p-1 text-[var(--npt-text)]"
         >
           <ChevronLeft size={24} />
         </button>
-        <h1 className="flex-1 text-center text-lg font-semibold pr-8">Import Wallet</h1>
+        <h1 className="flex-1 text-center text-lg font-semibold pr-4">Import Wallet</h1>
       </div>
 
       <div className="flex-1 overflow-y-auto">
         {step === "words" && (
-          <div className="px-6 pt-2 pb-6 space-y-4 animate-fade-in">
-            <div className="flex items-center justify-center gap-2">
-              <NeptuneLogo size={32} />
-              <span className="text-xl font-bold text-[var(--npt-text)]">neptune</span>
+          <div className="flex gap-4 flex-col animate-fade-in">
+            <div className="flex justify-center gap-3 py-2 bg-[var(--npt-success)] shadow-md">
+              {/* <div className="w-5 h-5 rounded-full bg-white/20 flex items-center justify-center shrink-0">
+                <span className="text-white text-xs font-bold">!</span>
+              </div> */}
+              <p className="text-sm text-white font-medium">
+                 Enter your 18-word seed phrase
+              </p>
             </div>
 
-            <p className="text-sm text-[var(--npt-muted)] text-center">
-              Enter your 18-word seed phrase
-            </p>
-            <div className="grid grid-cols-3 gap-2">
+            <div className="grid grid-cols-3 gap-2 px-4">
               {wordInputs.map((word, i) => (
                 <div key={i} className="flex items-center gap-1">
                   <span className="text-xs text-[var(--npt-muted)] w-5 text-right font-medium">{i + 1}.</span>
@@ -91,75 +93,76 @@ export default function SeedImportScreen() {
                 </div>
               ))}
             </div>
-            <button
+            <div className="flex justify-center">
+              <button
               onClick={handleWordsNext}
-              className="w-full py-3.5 rounded-full bg-[var(--npt-blue)] text-white font-semibold active:opacity-90"
+              className="w-1/2 py-1 rounded-full bg-[var(--npt-blue)] text-white font-semibold"
             >
-              Next
+              Continue
             </button>
+            </div>
           </div>
         )}
 
         {step === "password" && (
-          <div className="px-6 pt-4 space-y-6 animate-fade-in">
-            <div className="flex items-center justify-center gap-2">
-              <NeptuneLogo size={32} />
-              <span className="text-xl font-bold text-[var(--npt-text)]">neptune</span>
-            </div>
+          <div className="animate-fade-in h-full fiex flex-col">
+             <div className="h-1/4 bg-[var(--npt-logo-bg)] flex flex-row items-center justify-center gap-2 pb-6 pt-4">
+                          <NeptuneLogo size={56} />
+                          <NeptuneText size={120} />
+                        </div>
 
-            <div className="space-y-1">
-              <h2 className="text-lg font-bold text-[var(--npt-text)]">Password</h2>
-              <p className="text-sm text-[var(--npt-muted)]">
-                Choose a password to encrypt your seed
-              </p>
-            </div>
-
-            <div className="space-y-5">
-              <div>
-                <label className="block text-xs text-[var(--npt-muted)] mb-1">New password</label>
-                <div className="flex items-center border-b border-[var(--npt-border)]">
-                  <input
-                    type={showPin ? "text" : "password"}
-                    value={pin}
-                    onChange={(e) => setPin(e.target.value)}
-                    className="flex-1 bg-transparent py-2.5 text-[var(--npt-text)] focus:outline-none"
-                  />
-                  <button
-                    onClick={() => setShowPin(!showPin)}
-                    className="p-1.5 text-[var(--npt-muted)]"
-                  >
-                    {showPin ? <EyeOff size={18} /> : <Eye size={18} />}
-                  </button>
+            <div className="h-3/4 bg-white shadow-2xl shadow-black px-4 pb-4 flex flex-col rounded-t-3xl">
+              <h2 className="h-1/6 flex text-lg text-center font-bold flex-col justify-center item-center text-[var(--npt-muted)]">Create new Password</h2>
+              <div className="h-5/6 flex space-y-5 flex-col gap-1">
+                  <div>
+                  <label className="block text-xs text-[var(--npt-muted)]">Enter new password</label>
+                  <div className="flex items-center border-b border-[var(--npt-border)]">
+                    <input
+                      type={showPin ? "text" : "password"}
+                      value={pin}
+                      onChange={(e) => setPin(e.target.value)}
+                      className="flex-1 bg-transparent py-2.5 text-[var(--npt-text)] focus:outline-none"
+                    />
+                    <button
+                      onClick={() => setShowPin(!showPin)}
+                      className="p-1.5 text-[var(--npt-muted)]"
+                    >
+                      {showPin ? <EyeOff size={18} /> : <Eye size={18} />}
+                    </button>
+                  </div>
                 </div>
-              </div>
 
-              <div>
-                <label className="block text-xs text-[var(--npt-muted)] mb-1">Repeat password</label>
-                <div className="flex items-center border-b border-[var(--npt-border)]">
-                  <input
-                    type={showConfirm ? "text" : "password"}
-                    value={confirmPin}
-                    onChange={(e) => setConfirmPin(e.target.value)}
-                    onKeyDown={(e) => e.key === "Enter" && handleImport()}
-                    className="flex-1 bg-transparent py-2.5 text-[var(--npt-text)] focus:outline-none"
-                  />
-                  <button
-                    onClick={() => setShowConfirm(!showConfirm)}
-                    className="p-1.5 text-[var(--npt-muted)]"
-                  >
-                    {showConfirm ? <EyeOff size={18} /> : <Eye size={18} />}
-                  </button>
+                <div>
+                  <label className="block text-xs text-[var(--npt-muted)] mb-1">Repeat password</label>
+                  <div className="flex items-center border-b border-[var(--npt-border)]">
+                    <input
+                      type={showConfirm ? "text" : "password"}
+                      value={confirmPin}
+                      onChange={(e) => setConfirmPin(e.target.value)}
+                      onKeyDown={(e) => e.key === "Enter" && handleImport()}
+                      className="flex-1 bg-transparent py-2.5 text-[var(--npt-text)] focus:outline-none"
+                    />
+                    <button
+                      onClick={() => setShowConfirm(!showConfirm)}
+                      className="p-1.5 text-[var(--npt-muted)]"
+                    >
+                      {showConfirm ? <EyeOff size={18} /> : <Eye size={18} />}
+                    </button>
+                  </div>
                 </div>
-              </div>
-            </div>
-
-            <button
+                <div className="flex justify-center">
+                  <button
               onClick={handleImport}
               disabled={loading}
-              className="w-full py-3.5 rounded-full bg-[var(--npt-blue)] text-white font-semibold disabled:opacity-50 active:opacity-90"
+              className="w-1/2 py-1 rounded-full bg-[var(--npt-blue)] text-white font-semibold disabled:opacity-50 active:opacity-90"
             >
               {loading ? "Importing..." : "Continue"}
             </button>
+                  </div>
+              </div>
+            </div>
+
+            
           </div>
         )}
       </div>
