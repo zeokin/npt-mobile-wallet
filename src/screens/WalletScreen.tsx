@@ -43,7 +43,7 @@ export default function WalletScreen() {
   const freshUnlock = (location.state as any)?.freshUnlock === true;
 
   const { network, connected, setConnected } = useSettingsStore();
-  const { utxos, outgoingTxs, setBalance, setUtxos } = useWalletStore();
+  const { utxos, outgoingTxs, setBalance, setUtxos, myAddress, setMyAddress } = useWalletStore();
 
   // Clean up old pending transactions that have no addition records
   useEffect(() => {
@@ -52,7 +52,6 @@ export default function WalletScreen() {
   }, []);
   const [syncing, setSyncing] = useState(false);
   const [syncInfo, setSyncInfo] = useState<string | null>(null);
-  const [myAddress, setMyAddress] = useState("");
   const [pendingBlocked, setPendingBlocked] = useState(false);
 
   const unspentUtxos = utxos.filter((u) => !u.likely_spent);
@@ -256,7 +255,7 @@ export default function WalletScreen() {
             <div className="w-full flex justify-center gap-2 py-2 rounded-t-xl bg-[var(--npt-warning)]/90">
               <Clock size={16} className="text-[var(--npt-white)] shrink-0" />
               <span className="text-xs text-[var(--npt-white)] font-medium">
-                Transaction pending — sync to check status
+                Sync to check status
               </span>
             </div>
           )}

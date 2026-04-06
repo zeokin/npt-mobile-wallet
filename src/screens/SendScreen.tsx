@@ -100,7 +100,7 @@ export default function SendScreen() {
   };
 
   return (
-    <div className="flex flex-col h-full bg-[var(--npt-logo-bg)] safe-top safe-bottom">
+    <div className="relative flex flex-col h-full bg-[var(--npt-logo-bg)] safe-top safe-bottom">
       {/* Header */}
       <div className="flex items-center px-2 py-2">
         <button
@@ -191,25 +191,6 @@ export default function SendScreen() {
                 </div>
               )}
 
-              {/* Building animation overlay */}
-              {step === "building" && (
-                <div className="flex flex-col items-center py-6 gap-3">
-                  <Clock size={48} className="text-[var(--npt-warning)]" />
-                  <div className="flex gap-2">
-                    {[0, 1, 2, 3].map((i) => (
-                      <div
-                        key={i}
-                        className="w-2.5 h-2.5 rounded-full bg-[var(--npt-blue)]"
-                        style={{
-                          animation: `pulse-dot 1.4s ease-in-out ${i * 0.2}s infinite`,
-                        }}
-                      />
-                    ))}
-                  </div>
-                  <p className="text-sm text-[var(--npt-muted)]">{status}</p>
-                </div>
-              )}
-
               {/* Info card */}
               <div className={`flex items-center gap-2 p-2 rounded-sm ${insufficientBalance
                   ? "bg-red-100"
@@ -285,6 +266,25 @@ export default function SendScreen() {
           )}
         </div>
       </div>
+
+      {/* Full-screen building overlay — blocks all interaction */}
+      {step === "building" && (
+        <div className="absolute inset-0 z-50 bg-[var(--npt-blue)]/80 flex flex-col items-center justify-center gap-4">
+          <Clock size={56} className="text-[var(--npt-warning)]" />
+          <div className="flex gap-2">
+            {[0, 1, 2, 3].map((i) => (
+              <div
+                key={i}
+                className="w-3 h-3 rounded-full bg-white"
+                style={{
+                  animation: `pulse-dot 1.4s ease-in-out ${i * 0.2}s infinite`,
+                }}
+              />
+            ))}
+          </div>
+          <p className="text-sm text-white font-medium">{status}</p>
+        </div>
+      )}
     </div>
   );
 }
