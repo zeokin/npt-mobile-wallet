@@ -209,17 +209,17 @@ export default function SeedCreateScreen() {
                     </button>
                   </div>
                 </div>
-              
 
-              <div className="flex justify-center">
-                <button
-                onClick={handleCreateWallet}
-                disabled={loading}
-                className="w-1/2 py-1 rounded-full bg-[var(--npt-blue)] text-white font-semibold disabled:opacity-50 active:opacity-90 transition-opacity"
-              >
-                {loading ? "Creating..." : "Continue"}
-              </button>
-              </div>
+
+                <div className="flex justify-center">
+                  <button
+                    onClick={handleCreateWallet}
+                    disabled={loading}
+                    className="w-1/2 py-1 rounded-full bg-[var(--npt-blue)] text-white font-semibold disabled:opacity-50 active:opacity-90 transition-opacity"
+                  >
+                    {loading ? "Creating..." : "Continue"}
+                  </button>
+                </div>
               </div>
             </div>
           </div>
@@ -251,17 +251,17 @@ export default function SeedCreateScreen() {
             </div>
             <div className="flex flex-col items-center gap-2">
               <button
-              onClick={() => setStep("verify")}
-              className="w-2/3 py-1 rounded-full bg-[var(--npt-blue)] text-white font-semibold active:opacity-90"
-            >
-              I've Written Them Down
-            </button>
-            <button
-              onClick={handleCancel}
-              className="w-2/3 py-1 rounded-full text-white text-sm bg-[var(--npt-strong-muted)]"
-            >
-              Cancel
-            </button>
+                onClick={() => setStep("verify")}
+                className="w-2/3 py-1 rounded-full bg-[var(--npt-blue)] text-white font-semibold active:opacity-90"
+              >
+                I've Written Them Down
+              </button>
+              <button
+                onClick={handleCancel}
+                className="w-2/3 py-1 rounded-full text-white text-sm bg-[var(--npt-strong-muted)]"
+              >
+                Cancel
+              </button>
             </div>
           </div>
         )}
@@ -274,13 +274,12 @@ export default function SeedCreateScreen() {
               {Array.from({ length: TOTAL_QUESTIONS }).map((_, i) => (
                 <div
                   key={i}
-                  className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold ${
-                    i < quizIndex
+                  className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold ${i < quizIndex
                       ? "bg-[var(--npt-success)] text-white"
                       : i === quizIndex
-                      ? "border-2 border-[var(--npt-blue)] text-[var(--npt-blue)]"
-                      : "bg-[var(--npt-border)] text-[var(--npt-muted)]"
-                  }`}
+                        ? "border-2 border-[var(--npt-blue)] text-[var(--npt-blue)]"
+                        : "bg-[var(--npt-border)] text-[var(--npt-muted)]"
+                    }`}
                 >
                   {i < quizIndex ? "\u2713" : i + 1}
                 </div>
@@ -321,13 +320,12 @@ export default function SeedCreateScreen() {
 
             {showResult && (
               <div
-                className={`py-1 text-center text-sm font-medium ${
-                  isCorrect
+                className={`py-1 text-center text-sm font-medium ${isCorrect
                     ? "bg-[var(--npt-success)] text-white"
                     : "bg-[var(--npt-error)] text-white"
-                }`}
+                  }`}
               >
-                
+
                 {isCorrect
                   ? quizIndex + 1 >= TOTAL_QUESTIONS
                     ? "All correct! Your backup is verified."

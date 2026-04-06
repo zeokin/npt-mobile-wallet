@@ -20,20 +20,20 @@ import NavBar from "../components/ui/NavBar";
 const DEFAULT_SUPPORTER = "https://wallet.neptunefundamentals.org";
 const STALE_PENDING_BLOCKS = 20;
 
-function WaveChart() {
+function PendingBubble({ amount }: { amount: string }) {
   return (
-    <svg viewBox="0 0 957 179" fill="none" className="w-full h-full" preserveAspectRatio="none">
-      <path
-        d="M956 110.521C956 109.77 954.778 109.168 953.251 109.131C937.786 108.755 929.693 105.166 921.145 101.389C911.678 97.2173 901.943 92.8954 882.473 92.8954C863.004 92.8954 853.231 97.2173 843.797 101.389C834.753 105.391 826.24 109.168 808.908 109.168C792.493 109.168 783.518 97.2173 774.817 85.6797C765.426 73.2214 755.729 60.3497 735.382 60.3497C714.881 60.3497 709 83.2612 678 85.04C647 86.8187 632 67.6971 622 44.1285C609.517 14.708 597.21 13.0286 583.5 13.0002C569.79 12.9718 558.627 21.0205 549.16 27.9543C540.146 34.5687 531.637 40.826 514.763 40.826C494.946 40.826 485.177 47.2525 475.748 53.4722C466.7 59.3914 458.187 64.991 441.237 64.991C421.271 64.991 411.536 72.5261 402.064 79.817C393.059 86.7884 384.507 93.3651 367.672 93.3651C350.836 93.3651 342.323 86.9011 333.275 80.0425C323.846 72.8832 314.073 65.4608 294.145 65.4608C273.339 65.4608 264.635 92.0686 254.557 122.886C246.54 147.426 236.576 177.98 220.618 177.98C204.661 177.98 194.659 145.754 186.642 119.879C176.563 87.4272 167.859 59.4101 147.053 59.4101C126.706 59.4101 117.009 72.5261 107.656 85.2099C98.9518 96.9918 89.9423 109.168 73.5267 109.168C56.6912 109.168 48.1779 102.704 39.1303 95.8455C29.7008 88.6862 19.9278 81.2639 0 81.2639"
-        stroke="white"
-        strokeWidth="1.5"
-        strokeOpacity="0.6"
-      />
-      {/* Glowing dot */}
-      <circle cx="471" cy="56" r="8" fill="white" fillOpacity="0.15" />
-      <circle cx="471" cy="56" r="5" fill="white" fillOpacity="0.3" />
-      <circle cx="471" cy="56" r="2.5" fill="white" />
-    </svg>
+    <div className="absolute left-1/2 -translate-x-1/2 top-0 flex flex-col items-center">
+      <div className="bg-white/30 backdrop-blur-sm rounded-xl px-3 py-2">
+        <p className={`text-sm font-bold ${(Number(amount) >0.0) ? 'text-[var(--npt-error)]': 'text-[var(--npt-pending)]'} text-center whitespace-nowrap`}>
+          {amount}NPT
+        </p>
+        <p className="text-[10px] font-medium text-[var(--npt-warning)] text-center">
+          pending...
+        </p>
+      </div>
+      {/* Bubble pointer */}
+      <div className="w-0 h-0 border-l-[6px] border-r-[6px] border-t-[15px] border-l-transparent border-r-transparent border-t-white/30" />
+    </div>
   );
 }
 
@@ -90,7 +90,7 @@ export default function WalletScreen() {
               : t
           );
           useWalletStore.setState({ outgoingTxs: updated });
-          saveOutgoingHistory(JSON.stringify(updated)).catch(() => {});
+          saveOutgoingHistory(JSON.stringify(updated)).catch(() => { });
           setPendingBlocked(false);
           toast.success(`Transaction sent!`);
           return false;
@@ -106,7 +106,7 @@ export default function WalletScreen() {
             const store = useWalletStore.getState();
             const updated = store.outgoingTxs.filter((t) => t.status !== "pending");
             useWalletStore.setState({ outgoingTxs: updated });
-            saveOutgoingHistory(JSON.stringify(updated)).catch(() => {});
+            saveOutgoingHistory(JSON.stringify(updated)).catch(() => { });
             setPendingBlocked(false);
             toast("Stale pending transaction auto-cleared.");
             return false;
@@ -147,7 +147,7 @@ export default function WalletScreen() {
 
   useEffect(() => {
     if (!freshUnlock) {
-      hasPendingTx().then(setPendingBlocked).catch(() => {});
+      hasPendingTx().then(setPendingBlocked).catch(() => { });
       return;
     }
 
@@ -162,7 +162,7 @@ export default function WalletScreen() {
           setConnected(true, info.network, info.block_height);
         } catch {
           if (cancelled) return;
-          hasPendingTx().then(setPendingBlocked).catch(() => {});
+          hasPendingTx().then(setPendingBlocked).catch(() => { });
           return;
         }
       }
@@ -179,7 +179,7 @@ export default function WalletScreen() {
     if (!myAddress) {
       generateLocalAddress(null, 0, "generation", network || "main")
         .then((addr) => setMyAddress(addr))
-        .catch(() => {});
+        .catch(() => { });
     }
   }, []);
 
@@ -204,29 +204,18 @@ export default function WalletScreen() {
   };
 
   const displayAddress = myAddress
-    ? `${myAddress.slice(0, 28)}...${myAddress.slice(-8)}`
+    ? `${myAddress.slice(0, 20)}...${myAddress.slice(-6)}`
     : "Generating...";
 
   return (
-    <div className="flex flex-col h-full bg-[var(--npt-bg)] safe-top safe-bottom">
-      {/* Blue top section */}
-      <div className="relative bg-[var(--npt-blue)] flex flex-col safe-top" style={{ flex: "1 1 55%" }}>
-        {/* Header */}
-        <div className="flex items-center justify-between px-5 pt-3 pb-1">
-          <div className="w-8" />
-          <h1 className="text-lg font-bold text-white">My Wallet</h1>
-          <button
-            onClick={() => doSync(true)}
-            disabled={syncing}
-            className="p-1 text-white/70 hover:text-white transition-colors"
-          >
-            <RefreshCw size={20} className={syncing ? "animate-spin" : ""} />
-          </button>
-        </div>
-
+    <div className="flex flex-col h-full bg-[var(--npt-blue)] safe-top safe-bottom">
+      <div className="flex items-center px-2 py-2">
+        <h1 className="flex-1 text-center text-lg text-white font-semibold pr-4">My Wallet</h1>
+      </div>
+      <div className="animate-fade-in h-full flex flex-col justify-between ">
         {/* Balance area */}
-        <div className="flex-1 flex flex-col items-center justify-center px-5 -mt-2">
-          <div className="text-4xl font-bold text-white tracking-tight">
+        <div className="h-1/4  flex flex-col items-center justify-center px-2">
+          <div className="text-3xl font-bold text-white tracking-tight">
             {confirmedBalance.toFixed(4)} NPT
           </div>
           <p className="text-sm text-white/60 mt-1">
@@ -235,83 +224,87 @@ export default function WalletScreen() {
               <span> ({utxos.length - unspentUtxos.length} spent)</span>
             )}
           </p>
-        </div>
 
-        {/* Wave chart */}
-        <div className="relative w-full h-[90px] -mb-1">
-          <WaveChart />
-          {/* Pending amount floating label */}
-          {pendingOutgoing > 0 && (
-            <div className="absolute top-1 right-[30%] bg-white/20 backdrop-blur-sm rounded-lg px-2.5 py-1">
-              <span className="text-xs font-bold text-white">
-                {pendingOutgoing.toFixed(4)}NPT
+        </div>
+        <div className="h-1/12"></div>
+        <div className="h-1/4 relative py-10 w-full">
+          { (
+            <PendingBubble amount={pendingOutgoing.toFixed(4)} />
+          )}
+          <img
+            src="/wave-chart.svg"
+            alt=""
+            className="absolute left-1/2 -translate-x-1/2 top-0 w-full "
+          />
+        </div>
+        <div className="h-1/8 py-6 px-2">
+          <button
+            onClick={handleCopyAddress}
+            className="w-full flex items-center gap-2 bg-white rounded-full px-4 py-2 shadow-xl border border-[var(--npt-border)] active:bg-gray-50 transition-colors"
+          >
+            <span className="flex-1 text-xs font-mono text-[var(--npt-black)] truncate text-center">
+              {displayAddress}
+            </span>
+            <Copy size={16} className="text-[var(--npt-text)] shrink-0" />
+          </button>
+        </div>
+        <div className={`h-1/4 bg-white rounded-t-2xl flex flex-col items-center gap-2 ${pendingBlocked ? 'justify-between pb-4' : 'justify-center'}`}>
+
+
+          {/* Pending transaction banner */}
+          {pendingBlocked && (
+            <div className="w-full flex justify-center gap-2 py-2 rounded-t-xl bg-[var(--npt-warning)]/90">
+              <Clock size={16} className="text-[var(--npt-white)] shrink-0" />
+              <span className="text-xs text-[var(--npt-white)] font-medium">
+                Transaction pending — sync to check status
               </span>
             </div>
           )}
-        </div>
-      </div>
 
-      {/* Address pill (overlapping boundary) */}
-      <div className="relative z-10 mx-5 -mt-5">
-        <button
-          onClick={handleCopyAddress}
-          className="w-full flex items-center gap-2 bg-white rounded-xl px-4 py-3 shadow-sm border border-[var(--npt-border)] active:bg-gray-50 transition-colors"
-        >
-          <span className="flex-1 text-xs font-mono text-[var(--npt-muted)] truncate text-left">
-            {displayAddress}
-          </span>
-          <Copy size={16} className="text-[var(--npt-text)] shrink-0" />
-        </button>
+          {/* Send button */}
+          <div className="flex w-full justify-center">
+            <button
+            onClick={() => navigate("/send")}
+            disabled={pendingBlocked}
+            className="flex w-1/2 items-center justify-center gap-1 bg-[var(--npt-blue)] rounded-full py-1.5 disabled:opacity-60 active:opacity-90 transition-opacity"
+          >
+            <div className="w-5 h-5 rounded-full border-2 border-white border-dotted flex items-center">
+              <Send size={14} className="text-white rotate-45" />
+            </div>
+            <span className="text-white font-semibold text-base">Send</span>
+          </button>
+
+          </div>
+          {/* Sync button */}
+          <div className="flex items-center gap-2 px-2 w-full">
+            <button
+              onClick={() => doSync(true)}
+              disabled={syncing}
+              className="flex-1 py-0.5 rounded-full bg-[var(--npt-blue)] text-white text-sm font-semibold disabled:opacity-70 active:opacity-90 transition-opacity"
+            >
+              {syncing ? "Syncing..." : "Sync Wallet"}
+            </button>
+            <button
+              onClick={() => doSync(true)}
+              disabled={syncing}
+              className="p-2 text-[var(--npt-blue)]"
+            >
+              <RefreshCw size={18} className={syncing ? "animate-spin" : ""} />
+            </button>
+          </div>
+
+          {/* Sync info
+          {syncInfo && !syncing && (
+            <p className="text-xs text-[var(--npt-muted)]">{syncInfo}</p>
+          )} */}
+        </div>
+        <NavBar />
       </div>
 
       {/* White bottom section */}
-      <div className="flex flex-col items-center px-5 pt-5 pb-2 gap-3">
-        {/* Pending transaction banner */}
-        {pendingBlocked && (
-          <div className="w-full flex items-center gap-2 p-2.5 rounded-xl bg-amber-50 border border-amber-200">
-            <Clock size={14} className="text-[var(--npt-warning)] shrink-0" />
-            <span className="text-xs text-[var(--npt-warning)] font-medium">
-              Transaction pending — sync to check status
-            </span>
-          </div>
-        )}
 
-        {/* Send button */}
-        <button
-          onClick={() => navigate("/send")}
-          className="flex items-center gap-3 bg-[var(--npt-text)] rounded-full pl-3 pr-7 py-2.5 active:opacity-90 transition-opacity"
-        >
-          <div className="w-9 h-9 rounded-full border-2 border-white/30 flex items-center justify-center">
-            <Send size={16} className="text-white -rotate-45" />
-          </div>
-          <span className="text-white font-semibold text-base">Send</span>
-        </button>
 
-        {/* Sync button */}
-        <div className="flex items-center gap-2 w-full max-w-xs">
-          <button
-            onClick={() => doSync(true)}
-            disabled={syncing}
-            className="flex-1 py-2.5 rounded-full bg-[var(--npt-blue)] text-white text-sm font-semibold disabled:opacity-70 active:opacity-90 transition-opacity"
-          >
-            {syncing ? "Syncing..." : "Sync Wallet"}
-          </button>
-          <button
-            onClick={() => doSync(true)}
-            disabled={syncing}
-            className="p-2 text-[var(--npt-blue)]"
-          >
-            <RefreshCw size={18} className={syncing ? "animate-spin" : ""} />
-          </button>
-        </div>
-
-        {/* Sync info */}
-        {syncInfo && !syncing && (
-          <p className="text-xs text-[var(--npt-muted)]">{syncInfo}</p>
-        )}
-      </div>
-
-      <NavBar />
+      
     </div>
   );
 }

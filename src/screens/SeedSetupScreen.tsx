@@ -31,7 +31,7 @@ export default function SeedSetupScreen() {
       <div className="h-1/6 flex flex-col gap-2">
         <div className="flex justify-center"><button
           onClick={() => navigate("/seed/create")}
-          className="w-1/2 py-1 rounded-full bg-white text-[var(--npt-blue)] text-lg font-semibold active:opacity-90 transition-opacity"
+          className="w-2/3 py-1 rounded-full bg-white text-[var(--npt-blue)] text-lg font-semibold active:opacity-90 transition-opacity"
         >
           Create New Wallet
         </button></div>

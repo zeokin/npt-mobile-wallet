@@ -88,7 +88,7 @@ export default function SeedImportScreen() {
                 <span className="text-white text-xs font-bold">!</span>
               </div> */}
               <p className="text-sm text-white font-medium">
-                 Enter your 18-word seed phrase
+                Enter your 18-word seed phrase
               </p>
             </div>
 
@@ -112,11 +112,11 @@ export default function SeedImportScreen() {
             </div>
             <div className="flex justify-center">
               <button
-              onClick={handleWordsNext}
-              className="w-1/2 py-1 rounded-full bg-[var(--npt-blue)] text-white font-semibold"
-            >
-              Continue
-            </button>
+                onClick={handleWordsNext}
+                className="w-1/2 py-1 rounded-full bg-[var(--npt-blue)] text-white font-semibold"
+              >
+                Continue
+              </button>
             </div>
           </div>
         )}
@@ -190,15 +190,15 @@ export default function SeedImportScreen() {
                 </div>
 
 
-              <div className="flex justify-center">
-                <button
-                onClick={handleImport}
-                disabled={loading}
-                className="w-1/2 py-1 rounded-full bg-[var(--npt-blue)] text-white font-semibold disabled:opacity-50 active:opacity-90 transition-opacity"
-              >
-                {loading ? "Importing..." : "Continue"}
-              </button>
-              </div>
+                <div className="flex justify-center">
+                  <button
+                    onClick={handleImport}
+                    disabled={loading}
+                    className="w-1/2 py-1 rounded-full bg-[var(--npt-blue)] text-white font-semibold disabled:opacity-50 active:opacity-90 transition-opacity"
+                  >
+                    {loading ? "Importing..." : "Continue"}
+                  </button>
+                </div>
               </div>
             </div>
           </div>

@@ -85,7 +85,7 @@ export default function UnlockScreen() {
 
       {/* Bottom actions */}
       <div className="h-1/6 flex flex-col gap-2">
-         <div className="flex justify-center"><button
+        <div className="flex justify-center"><button
           onClick={handleUnlock}
           disabled={loading}
           className="w-1/2 py-1 rounded-full bg-white text-[var(--npt-blue)] text-lg font-semibold active:opacity-90 transition-opacity"
