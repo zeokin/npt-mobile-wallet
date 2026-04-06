@@ -60,7 +60,7 @@ export default function UnlockScreen() {
         <p className="text-2xl text-white/60 font-light">Welcome back</p>
 
         {/* Password input */}
-        <div className="w-full mt-3 px-6">
+        <div className="w-full mt-2 px-6">
           <div className="border-b border-t border-white/90 flex items-center">
             <input
               type={showPin ? "text" : "password"}
@@ -68,7 +68,7 @@ export default function UnlockScreen() {
               value={pin}
               onChange={(e) => setPin(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && handleUnlock()}
-              className="flex-1 bg-transparent text-white text-center text-xl py-2 placeholder:text-white/40 focus:outline-none"
+              className="flex-1 bg-transparent text-white text-center text-lg py-1 placeholder:text-white/40 focus:outline-none"
             />
             <button
               onClick={() => setShowPin(!showPin)}

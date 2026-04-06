@@ -208,7 +208,7 @@ export default function WalletScreen() {
     : "Generating...";
 
   return (
-    <div className="flex flex-col h-full bg-[var(--npt-bg)]">
+    <div className="flex flex-col h-full bg-[var(--npt-bg)] safe-top safe-bottom">
       {/* Blue top section */}
       <div className="relative bg-[var(--npt-blue)] flex flex-col safe-top" style={{ flex: "1 1 55%" }}>
         {/* Header */}

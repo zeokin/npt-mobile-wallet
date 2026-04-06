@@ -6,6 +6,21 @@ import { importWallet } from "../api/rpc";
 import NeptuneLogo from "../components/ui/NeptuneLogo";
 import NeptuneText from "../components/ui/NeptuneText";
 
+function getPasswordStrength(pw: string): { label: string; color: string; width: string } {
+  if (pw.length === 0) return { label: "", color: "", width: "0%" };
+  let score = 0;
+  if (pw.length >= 8) score++;
+  if (pw.length >= 12) score++;
+  if (/[a-z]/.test(pw) && /[A-Z]/.test(pw)) score++;
+  if (/\d/.test(pw)) score++;
+  if (/[^a-zA-Z0-9]/.test(pw)) score++;
+
+  if (score <= 1) return { label: "Weak", color: "var(--npt-error)", width: "25%" };
+  if (score <= 2) return { label: "Fair", color: "var(--npt-warning)", width: "50%" };
+  if (score <= 3) return { label: "Good", color: "var(--npt-blue)", width: "75%" };
+  return { label: "Strong", color: "var(--npt-success)", width: "100%" };
+}
+
 export default function SeedImportScreen() {
   const navigate = useNavigate();
   const [step, setStep] = useState<"words" | "password">("words");
@@ -15,6 +30,8 @@ export default function SeedImportScreen() {
   const [showPin, setShowPin] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
   const [loading, setLoading] = useState(false);
+
+  const strength = getPasswordStrength(pin);
 
   const handlePaste = (e: React.ClipboardEvent, index: number) => {
     const text = e.clipboardData.getData("text").trim();
@@ -106,63 +123,84 @@ export default function SeedImportScreen() {
 
         {step === "password" && (
           <div className="animate-fade-in h-full fiex flex-col">
-             <div className="h-1/4 bg-[var(--npt-logo-bg)] flex flex-row items-center justify-center gap-2 pb-6 pt-4">
-                          <NeptuneLogo size={56} />
-                          <NeptuneText size={120} />
-                        </div>
+            {/* Top logo section - #EDF1F9 bg */}
+            <div className="h-1/4 bg-[var(--npt-logo-bg)] flex flex-row items-center justify-center gap-2 pb-6 pt-4">
+              <NeptuneLogo size={56} />
+              <NeptuneText size={120} />
+            </div>
 
+            {/* White password section */}
             <div className="h-3/4 bg-white shadow-2xl shadow-black px-4 pb-4 flex flex-col rounded-t-3xl">
               <h2 className="h-1/6 flex text-lg text-center font-bold flex-col justify-center item-center text-[var(--npt-muted)]">Create new Password</h2>
+
               <div className="h-5/6 flex space-y-5 flex-col gap-1">
-                  <div>
+                {/* New password */}
+                <div>
                   <label className="block text-xs text-[var(--npt-muted)]">Enter new password</label>
                   <div className="flex items-center border-b border-[var(--npt-border)]">
                     <input
                       type={showPin ? "text" : "password"}
                       value={pin}
                       onChange={(e) => setPin(e.target.value)}
-                      className="flex-1 bg-transparent py-2.5 text-[var(--npt-text)] focus:outline-none"
+                      className="flex-1 bg-transparent py-1 text-[var(--npt-text)] focus:outline-none"
                     />
                     <button
+                      type="button"
                       onClick={() => setShowPin(!showPin)}
-                      className="p-1.5 text-[var(--npt-muted)]"
+                      className="text-[var(--npt-muted)]"
                     >
                       {showPin ? <EyeOff size={18} /> : <Eye size={18} />}
                     </button>
                   </div>
+                  {/* Strength indicator */}
+                  {pin.length > 0 && (
+                    <div className="dfs">
+                      <div className="h-1 bg-[var(--npt-border)] rounded-full overflow-hidden">
+                        <div
+                          className="h-full rounded-full transition-all duration-300"
+                          style={{ width: strength.width, backgroundColor: strength.color }}
+                        />
+                      </div>
+                      <p className="text-xs mt-1" style={{ color: strength.color }}>
+                        {strength.label}
+                      </p>
+                    </div>
+                  )}
                 </div>
 
+                {/* Repeat password */}
                 <div>
-                  <label className="block text-xs text-[var(--npt-muted)] mb-1">Repeat password</label>
+                  <label className="block text-xs text-[var(--npt-muted)]">Repeat password</label>
                   <div className="flex items-center border-b border-[var(--npt-border)]">
                     <input
                       type={showConfirm ? "text" : "password"}
                       value={confirmPin}
                       onChange={(e) => setConfirmPin(e.target.value)}
                       onKeyDown={(e) => e.key === "Enter" && handleImport()}
-                      className="flex-1 bg-transparent py-2.5 text-[var(--npt-text)] focus:outline-none"
+                      className="flex-1 bg-transparent py-1 text-[var(--npt-text)] focus:outline-none"
                     />
                     <button
+                      type="button"
                       onClick={() => setShowConfirm(!showConfirm)}
-                      className="p-1.5 text-[var(--npt-muted)]"
+                      className="text-[var(--npt-muted)]"
                     >
                       {showConfirm ? <EyeOff size={18} /> : <Eye size={18} />}
                     </button>
                   </div>
                 </div>
-                <div className="flex justify-center">
-                  <button
-              onClick={handleImport}
-              disabled={loading}
-              className="w-1/2 py-1 rounded-full bg-[var(--npt-blue)] text-white font-semibold disabled:opacity-50 active:opacity-90"
-            >
-              {loading ? "Importing..." : "Continue"}
-            </button>
-                  </div>
+
+
+              <div className="flex justify-center">
+                <button
+                onClick={handleImport}
+                disabled={loading}
+                className="w-1/2 py-1 rounded-full bg-[var(--npt-blue)] text-white font-semibold disabled:opacity-50 active:opacity-90 transition-opacity"
+              >
+                {loading ? "Importing..." : "Continue"}
+              </button>
+              </div>
               </div>
             </div>
-
-            
           </div>
         )}
       </div>
