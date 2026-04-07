@@ -203,7 +203,7 @@ export default function WalletScreen() {
   };
 
   const displayAddress = myAddress
-    ? `${myAddress.slice(0, 20)}...${myAddress.slice(-6)}`
+    ? `${myAddress.slice(0, 25)}...${myAddress.slice(-6)}`
     : "Generating...";
 
   return (
@@ -265,7 +265,7 @@ export default function WalletScreen() {
             <button
             onClick={() => navigate("/send")}
             disabled={pendingBlocked}
-            className="flex w-1/2 items-center justify-center gap-1 bg-[var(--npt-blue)] rounded-full py-1.5 disabled:opacity-60 active:opacity-90 transition-opacity"
+            className="flex w-1/2 items-center justify-center gap-3 bg-[var(--npt-blue)] rounded-full py-1.5 disabled:opacity-60 active:opacity-90 transition-opacity"
           >
             <div className="w-5 h-5 rounded-full border-2 border-white border-dotted flex items-center">
               <Send size={14} className="text-white rotate-45" />

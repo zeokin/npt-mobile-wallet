@@ -27,7 +27,7 @@ export default function HistoryScreen() {
                   : t
               );
               useWalletStore.setState({ outgoingTxs: updated });
-              saveOutgoingHistory(JSON.stringify(updated)).catch(() => { });
+              saveOutgoingHistory(JSON.stringify(updated)).catch(() => {});
             }
           } catch { /* ignore */ }
         }
@@ -38,9 +38,9 @@ export default function HistoryScreen() {
   }, [tab]);
 
   return (
-    <div className="flex flex-col h-full bg-[var(--npt-bg)] safe-top">
+    <div className="flex flex-col h-full bg-[var(--npt-logo-bg)] safe-top safe-bottom">
       {/* Header */}
-      <div className="flex items-center justify-between px-5 pt-3 pb-1">
+      <div className="flex items-center justify-between px-2 py-2">
         <div className="w-8" />
         <h1 className="text-lg font-bold text-[var(--npt-text)]">History</h1>
         <div className="w-8 flex justify-end">
@@ -52,26 +52,28 @@ export default function HistoryScreen() {
       <div className="flex mx-5 mt-1 border-b border-[var(--npt-border)]">
         <button
           onClick={() => setTab("in")}
-          className={`flex-1 pb-2.5 text-sm font-semibold transition-colors ${tab === "in"
+          className={`flex-1 pb-2.5 text-sm font-semibold transition-colors ${
+            tab === "in"
               ? "text-[var(--npt-blue)] border-b-2 border-[var(--npt-blue)]"
-              : "text-[var(--npt-muted)]"
-            }`}
+              : "text-[var(--npt-muted)] border-b-1"
+          }`}
         >
           Received({incoming.length})
         </button>
         <button
           onClick={() => setTab("out")}
-          className={`flex-1 pb-2.5 text-sm font-semibold transition-colors ${tab === "out"
+          className={`flex-1 pb-2.5 text-sm font-semibold transition-colors ${
+            tab === "out"
               ? "text-[var(--npt-blue)] border-b-2 border-[var(--npt-blue)]"
-              : "text-[var(--npt-muted)]"
-            }`}
+              : "text-[var(--npt-strong-muted)] border-b-1"
+          }`}
         >
           Sent({outgoing.length})
         </button>
       </div>
 
       {/* List */}
-      <div className="flex-1 overflow-y-auto px-5 py-3 space-y-2">
+      <div className="flex-1 overflow-y-auto animate-fade-in px-4 py-3 space-y-2">
         {/* Received tab */}
         {tab === "in" && incoming.length === 0 && (
           <div className="text-center mt-12 space-y-2">
@@ -85,24 +87,26 @@ export default function HistoryScreen() {
           incoming.map((utxo, i) => (
             <div
               key={i}
-              className={`flex items-center gap-3 p-3 rounded-xl bg-white border border-[var(--npt-border)] shadow-sm ${utxo.likely_spent ? "opacity-50" : ""
-                }`}
+              className={`flex items-center gap-3 p-2 rounded-2xl bg-white border border-[var(--npt-border)] shadow-sm ${
+                utxo.likely_spent ? "opacity-50" : ""
+              }`}
             >
               {/* Status icon */}
-              <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${utxo.likely_spent
-                  ? "bg-red-50"
-                  : "bg-green-50"
-                }`}>
+              <div className={`w-6 h-6 rounded-full flex items-center justify-center shrink-0 ${
+                utxo.likely_spent
+                  ? "bg-[var(--npt-error)]"
+                  : "bg-[var(--npt-success)]"
+              }`}>
                 {utxo.likely_spent ? (
-                  <XCircle size={18} className="text-[var(--npt-error)]" />
+                  <XCircle size={18} className="text-[var(--npt-white)]" />
                 ) : (
-                  <CheckCircle2 size={18} className="text-[var(--npt-success)]" />
+                  <CheckCircle2 size={18} className="text-[var(--npt-white)]" />
                 )}
               </div>
 
               {/* Block info */}
               <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-1.5">
+                <div className="flex items-center gap-1">
                   <span className="text-sm text-[var(--npt-text)]">Block</span>
                   <span className="text-sm font-semibold text-[var(--npt-blue)]">{utxo.block_height}</span>
                 </div>
@@ -111,11 +115,12 @@ export default function HistoryScreen() {
 
               {/* Amount */}
               <div className="text-right shrink-0">
-                <span className={`text-sm font-semibold ${utxo.likely_spent
-                    ? "text-[var(--npt-muted)] line-through"
-                    : "text-[var(--npt-blue)]"
-                  }`}>
-                  {utxo.amount} NPT
+                <span className={`text-sm font-semibold ${
+                  utxo.likely_spent
+                    ? "text-[var(--npt-error)] line-through"
+                    : "text-[var(--npt-success)]"
+                }`}>
+                  {parseFloat(utxo.amount).toFixed(4)} NPT
                 </span>
               </div>
             </div>
@@ -131,17 +136,18 @@ export default function HistoryScreen() {
           outgoing.map((tx, i) => (
             <div
               key={i}
-              className="flex items-center gap-3 p-3 rounded-xl bg-white border border-[var(--npt-border)] shadow-sm"
+              className="flex items-center gap-3 p-2 rounded-2xl bg-white border border-[var(--npt-border)] shadow-sm"
             >
               {/* Status icon */}
-              <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${tx.status === "confirmed"
-                  ? "bg-green-50"
-                  : "bg-amber-50"
-                }`}>
+              <div className={`w-6 h-6 rounded-full flex items-center justify-center shrink-0 ${
+                tx.status === "confirmed"
+                  ? "bg-[var(--npt-blue)]"
+                  : "bg-[var(--npt-pending)]"
+              }`}>
                 {tx.status === "confirmed" ? (
-                  <CheckCircle2 size={18} className="text-[var(--npt-success)]" />
+                  <CheckCircle2 size={18} className="text-[var(--npt-white)]" />
                 ) : (
-                  <HelpCircle size={18} className="text-[var(--npt-warning)]" />
+                  <HelpCircle size={18} className="text-[var(--npt-white)]" />
                 )}
               </div>
 
@@ -162,10 +168,15 @@ export default function HistoryScreen() {
                   </>
                 ) : (
                   <>
-                    <span className="text-sm text-[var(--npt-text)]">?</span>
-                    <div className="mt-0.5">
-                      <span className="text-xs px-2 py-0.5 rounded-full bg-amber-100 text-[var(--npt-warning)] font-semibold">
-                        Pending
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-sm text-[var(--npt-text)]">Block</span>
+                      <span className="text-sm font-semibold text-[var(--npt-pending)]">
+                        ?
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-sm text-[var(--npt-warning)] font-semibold">
+                        Pending...
                       </span>
                     </div>
                   </>
@@ -177,7 +188,7 @@ export default function HistoryScreen() {
                 <span className="text-sm font-semibold text-[var(--npt-error)]">
                   {tx.amount} NPT
                 </span>
-                <p className="text-xs text-[var(--npt-muted)]">fee: {tx.fee} NPT</p>
+                <p className="text-xs font-bold text-[var(--npt-muted)]">fee: {tx.fee} NPT</p>
               </div>
             </div>
           ))}

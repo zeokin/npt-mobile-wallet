@@ -5,10 +5,8 @@ import SeedSetupScreen from "./screens/SeedSetupScreen";
 import SeedCreateScreen from "./screens/SeedCreateScreen";
 import SeedImportScreen from "./screens/SeedImportScreen";
 import UnlockScreen from "./screens/UnlockScreen";
-import ConnectScreen from "./screens/ConnectScreen";
 import WalletScreen from "./screens/WalletScreen";
 import SendScreen from "./screens/SendScreen";
-import ReceiveScreen from "./screens/ReceiveScreen";
 import HistoryScreen from "./screens/HistoryScreen";
 import SettingsScreen from "./screens/SettingsScreen";
 
@@ -21,10 +19,8 @@ function AppRoutes() {
       <Route path="/seed/create" element={<SeedCreateScreen />} />
       <Route path="/seed/import" element={<SeedImportScreen />} />
       <Route path="/unlock" element={<UnlockScreen />} />
-      <Route path="/connect" element={<ConnectScreen />} />
       <Route path="/wallet" element={<WalletScreen />} />
       <Route path="/send" element={<SendScreen />} />
-      <Route path="/receive" element={<ReceiveScreen />} />
       <Route path="/history" element={<HistoryScreen />} />
       <Route path="/settings" element={<SettingsScreen />} />
       <Route path="*" element={<Navigate to="/" replace />} />

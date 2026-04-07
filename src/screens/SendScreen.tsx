@@ -269,7 +269,7 @@ export default function SendScreen() {
 
       {/* Full-screen building overlay — blocks all interaction */}
       {step === "building" && (
-        <div className="absolute inset-0 z-50 bg-[var(--npt-blue)]/80 flex flex-col items-center justify-center gap-4">
+        <div className="absolute inset-0 z-50 bg-[var(--npt-text)]/80 flex flex-col items-center justify-center gap-4">
           <Clock size={56} className="text-[var(--npt-warning)]" />
           <div className="flex gap-2">
             {[0, 1, 2, 3].map((i) => (
