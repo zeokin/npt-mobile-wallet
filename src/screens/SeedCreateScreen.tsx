@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { ChevronLeft, Eye, EyeOff } from "lucide-react";
 import { createWallet, deleteWallet } from "../api/rpc";
+import { useWalletStore } from "../store/wallet-store";
 import NeptuneLogo from "../components/ui/NeptuneLogo";
 import NeptuneText from "../components/ui/NeptuneText";
 
@@ -109,6 +110,7 @@ export default function SeedCreateScreen() {
     }
 
     if (quizIndex + 1 >= TOTAL_QUESTIONS) {
+      useWalletStore.getState().reset();
       toast.success("Wallet created successfully!");
       navigate("/wallet", { replace: true, state: { freshUnlock: true } });
     } else {

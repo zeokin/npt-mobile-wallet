@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { ChevronLeft, Eye, EyeOff } from "lucide-react";
 import { importWallet } from "../api/rpc";
+import { useWalletStore } from "../store/wallet-store";
 import NeptuneLogo from "../components/ui/NeptuneLogo";
 import NeptuneText from "../components/ui/NeptuneText";
 
@@ -58,6 +59,7 @@ export default function SeedImportScreen() {
     setLoading(true);
     try {
       await importWallet(wordInputs.join(" "), pin);
+      useWalletStore.getState().reset();
       toast.success("Wallet imported!");
       navigate("/wallet", { replace: true, state: { freshUnlock: true } });
     } catch (e) {

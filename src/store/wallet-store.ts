@@ -71,7 +71,8 @@ export const useWalletStore = create<WalletState>()(
             (tx) => tx.addition_record_hexes?.length > 0 || tx.status === "confirmed"
           ),
         })),
-      reset: () =>
+      reset: () =>{
+        saveOutgoingHistory(JSON.stringify([])).catch(() => {});
         set({
           balance: "0",
           utxos: [],
@@ -80,7 +81,8 @@ export const useWalletStore = create<WalletState>()(
           loading: false,
           error: null,
           lastSyncHeight: 0,
-        }),
+        });
+      },
     }),
     { name: "npt-wallet" }
   )

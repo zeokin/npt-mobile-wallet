@@ -9,7 +9,7 @@ import NavBar from "../components/ui/NavBar";
 
 export default function SettingsScreen() {
   const navigate = useNavigate();
-  const { nodeUrl, network, blockHeight, setNodeUrl, reset: resetSettings } = useSettingsStore();
+  const { network, blockHeight, reset: resetSettings } = useSettingsStore();
   const { reset: resetWallet } = useWalletStore();
   const [showSeed, setShowSeed] = useState(false);
   const [seedWords, setSeedWords] = useState<string[]>([]);
@@ -57,7 +57,7 @@ export default function SettingsScreen() {
         </div>
 
         {/* URL / Token inputs */}
-        <div className="space-y-2">
+        {/* <div className="space-y-2">
           <div>
             <label className="block text-xs text-[var(--npt-muted)] mb-1 font-medium">Supporter URL</label>
             <input
@@ -69,7 +69,7 @@ export default function SettingsScreen() {
           </div>
 
           <p className="text-xs text-[var(--npt-muted)]">Changes take effect on next connection.</p>
-        </div>
+        </div> */}
 
         {/* Seed phrase backup */}
         <div className="p-3 rounded-xl bg-white border border-[var(--npt-border)] shadow-sm space-y-2">
@@ -102,7 +102,7 @@ export default function SettingsScreen() {
               </button></div>
             </>
           ) : (
-            <div className="flex gap-2">
+            <div className="flex gap-2 flex-col">
               <div className="flex-1 flex items-center border border-[var(--npt-border)] rounded-md bg-[var(--npt-bg)] px-3">
                 <input
                   type={showSeedPin ? "text" : "password"}
@@ -119,12 +119,14 @@ export default function SettingsScreen() {
                   {showSeedPin ? <EyeOff size={16} /> : <Eye size={16} />}
                 </button>
               </div>
+              <div className="flex justify-center">
               <button
                 onClick={handleExportSeed}
-                className="px-4 py-2 rounded-xl bg-[var(--npt-blue)] text-white text-sm font-semibold active:opacity-80"
+                className="px-4 w-1/2 py-1 rounded-xl bg-[var(--npt-blue)] text-white text-sm font-semibold active:opacity-80"
               >
                 Show
               </button>
+              </div>
             </div>
           )}
         </div>

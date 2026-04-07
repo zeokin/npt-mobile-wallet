@@ -23,11 +23,11 @@ const STALE_PENDING_BLOCKS = 20;
 function PendingBubble({ amount }: { amount: string }) {
   return (
     <div className="absolute left-1/2 -translate-x-1/2 top-0 flex flex-col items-center">
-      <div className="bg-white/30 backdrop-blur-sm rounded-xl px-3 py-2">
-        <p className={`text-sm font-bold ${(Number(amount) >0.0) ? 'text-[var(--npt-error)]': 'text-[var(--npt-pending)]'} text-center whitespace-nowrap`}>
+      <div className="bg-white/30 backdrop-blur-sm rounded-xl px-3 py-3">
+        <p className={`text-md font-bold ${(Number(amount) > 0.0) ? 'text-[var(--npt-error)]' : 'text-[var(--npt-pending)]'} text-center whitespace-nowrap`}>
           {amount}NPT
         </p>
-        <p className="text-[10px] font-medium text-[var(--npt-warning)] text-center">
+        <p className="text-[14px] font-medium text-[var(--npt-warning)] text-center">
           pending...
         </p>
       </div>
@@ -53,7 +53,7 @@ export default function WalletScreen() {
   const [syncing, setSyncing] = useState(false);
   const [syncInfo, setSyncInfo] = useState<string | null>(null);
   const [pendingBlocked, setPendingBlocked] = useState(false);
-
+  
   const unspentUtxos = utxos.filter((u) => !u.likely_spent);
   const confirmedBalance = unspentUtxos.reduce((sum, u) => sum + (parseFloat(u.amount) || 0), 0);
   const pendingOutgoing = outgoingTxs
@@ -209,12 +209,12 @@ export default function WalletScreen() {
   return (
     <div className="flex flex-col h-full bg-[var(--npt-blue)] safe-top safe-bottom">
       <div className="flex items-center px-2 py-2">
-        <h1 className="flex-1 text-center text-lg text-white font-semibold pr-4">My Wallet</h1>
+        <h1 className="flex-1 text-center text-lg text-white font-semibold">My Wallet</h1>
       </div>
       <div className="animate-fade-in h-full flex flex-col justify-between ">
         {/* Balance area */}
-        <div className="h-1/4  flex flex-col items-center justify-center px-2">
-          <div className="text-3xl font-bold text-white tracking-tight">
+        <div className="h-8/24  flex flex-col items-center justify-center px-2">
+          <div className="text-4xl font-bold text-white tracking-tight">
             {confirmedBalance.toFixed(4)} NPT
           </div>
           <p className="text-sm text-white/60 mt-1">
@@ -225,17 +225,18 @@ export default function WalletScreen() {
           </p>
 
         </div>
-        <div className="h-1/12"></div>
+
         <div className="h-1/4 relative py-10 w-full">
-          { (
+          {(
             <PendingBubble amount={pendingOutgoing.toFixed(4)} />
           )}
           <img
             src="/wave-chart.svg"
             alt=""
-            className="absolute left-1/2 -translate-x-1/2 top-0 w-full "
+            className="absolute left-1/2 -translate-x-1/2 left-0 min-w-full h-[185px] "
           />
         </div>
+
         <div className="h-1/8 py-6 px-2">
           <button
             onClick={handleCopyAddress}
@@ -263,15 +264,15 @@ export default function WalletScreen() {
           {/* Send button */}
           <div className="flex w-full justify-center">
             <button
-            onClick={() => navigate("/send")}
-            disabled={pendingBlocked}
-            className="flex w-1/2 items-center justify-center gap-3 bg-[var(--npt-blue)] rounded-full py-1.5 disabled:opacity-60 active:opacity-90 transition-opacity"
-          >
-            <div className="w-5 h-5 rounded-full border-2 border-white border-dotted flex items-center">
-              <Send size={14} className="text-white rotate-45" />
-            </div>
-            <span className="text-white font-semibold text-base">Send</span>
-          </button>
+              onClick={() => navigate("/send")}
+              disabled={pendingBlocked}
+              className="flex w-1/2 items-center justify-center gap-3 bg-[var(--npt-blue)] rounded-full py-1.5 disabled:opacity-60 active:opacity-90 transition-opacity"
+            >
+              <div className="w-5 h-5 rounded-full border-2 border-white border-dotted flex items-center">
+                <Send size={14} className="text-white rotate-45" />
+              </div>
+              <span className="text-white font-semibold text-base">Send</span>
+            </button>
 
           </div>
           {/* Sync button */}
@@ -303,7 +304,7 @@ export default function WalletScreen() {
       {/* White bottom section */}
 
 
-      
+
     </div>
   );
 }
