@@ -51,7 +51,7 @@ export default function WalletScreen() {
     if (store.clearPendingWithoutRecords) store.clearPendingWithoutRecords();
   }, []);
   const [syncing, setSyncing] = useState(false);
-  const [syncInfo, setSyncInfo] = useState<string | null>(null);
+  const [_syncInfo, setSyncInfo] = useState<string | null>(null);
   const [pendingBlocked, setPendingBlocked] = useState(false);
   
   const unspentUtxos = utxos.filter((u) => !u.likely_spent);
@@ -237,7 +237,7 @@ export default function WalletScreen() {
           />
         </div>
 
-        <div className="h-1/8 py-6 px-2">
+        <div className="h-1/8 z-10 py-6 px-2">
           <button
             onClick={handleCopyAddress}
             className="w-full flex items-center gap-2 bg-white rounded-full px-4 py-2 shadow-xl border border-[var(--npt-border)] active:bg-gray-50 transition-colors"

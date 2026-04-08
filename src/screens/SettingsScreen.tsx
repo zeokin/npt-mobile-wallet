@@ -1,16 +1,14 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
-import { Eye, EyeOff, Shield, Link2, Lock, LogOut } from "lucide-react";
+import { Eye, EyeOff, Shield, Link2, Lock } from "lucide-react";
 import { disconnectNode, exportSeedPhrase, lockWallet } from "../api/rpc";
 import { useSettingsStore } from "../store/settings-store";
-import { useWalletStore } from "../store/wallet-store";
 import NavBar from "../components/ui/NavBar";
 
 export default function SettingsScreen() {
   const navigate = useNavigate();
-  const { network, blockHeight, reset: resetSettings } = useSettingsStore();
-  const { reset: resetWallet } = useWalletStore();
+  const { network, blockHeight } = useSettingsStore();
   const [showSeed, setShowSeed] = useState(false);
   const [seedWords, setSeedWords] = useState<string[]>([]);
   const [seedPin, setSeedPin] = useState("");
@@ -19,7 +17,6 @@ export default function SettingsScreen() {
 
   const handleLock = async () => {
     try { await lockWallet(); await disconnectNode(); } catch { /* ignore */ }
-    resetSettings(); resetWallet();
     navigate("/unlock", { replace: true });
   };
 
