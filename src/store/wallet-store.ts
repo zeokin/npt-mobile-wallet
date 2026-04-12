@@ -7,12 +7,14 @@ interface WalletState {
   balance: string;
   utxos: DiscoveredUtxo[];
   outgoingTxs: OutgoingTx[];
+  myAddress: string;
   loading: boolean;
   error: string | null;
   lastSyncHeight: number;
   setBalance: (balance: string) => void;
   setUtxos: (utxos: DiscoveredUtxo[]) => void;
   addOutgoingTx: (tx: OutgoingTx) => void;
+  setMyAddress: (address: string) => void;
   setLoading: (loading: boolean) => void;
   setError: (error: string | null) => void;
   setLastSyncHeight: (height: number) => void;
@@ -37,11 +39,13 @@ export const useWalletStore = create<WalletState>()(
       balance: "0",
       utxos: [],
       outgoingTxs: [],
+      myAddress: "",
       loading: false,
       error: null,
       lastSyncHeight: 0,
       setBalance: (balance) => set({ balance }),
       setUtxos: (utxos) => set({ utxos }),
+      setMyAddress: (address) => set({ myAddress: address }),
       addOutgoingTx: (tx) =>
         set((state) => {
           const updated = [tx, ...state.outgoingTxs];
@@ -67,15 +71,18 @@ export const useWalletStore = create<WalletState>()(
             (tx) => tx.addition_record_hexes?.length > 0 || tx.status === "confirmed"
           ),
         })),
-      reset: () =>
+      reset: () =>{
+        saveOutgoingHistory(JSON.stringify([])).catch(() => {});
         set({
           balance: "0",
           utxos: [],
           outgoingTxs: [],
+          myAddress: "",
           loading: false,
           error: null,
           lastSyncHeight: 0,
-        }),
+        });
+      },
     }),
     { name: "npt-wallet" }
   )
