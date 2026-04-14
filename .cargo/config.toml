@@ -1,28 +1,3 @@
-[target.aarch64-linux-android]
-linker = "aarch64-linux-android24-clang"
-ar = "llvm-ar"
-rustflags = [
-    "-C", "link-arg=-static-libgcc",
-    "-C", "link-arg=-lc++_static",
-    "-C", "link-arg=-lc++abi",
-    "-C", "link-arg=-lunwind",
-]
-
 [target.x86_64-linux-android]
-linker = "x86_64-linux-android24-clang"
-ar = "llvm-ar"
-rustflags = [
-    "-C", "link-arg=-static-libgcc",
-    "-C", "link-arg=-lc++_static",
-    "-C", "link-arg=-lc++abi",
-    "-C", "link-arg=-lunwind",
-]
-
-[env]
-ANDROID_NDK_HOME = { value = "", force = false }
-ANDROID_NDK_ROOT = { value = "", force = false }
-CMAKE_POLICY_VERSION_MINIMUM = "3.5"
-CMAKE_BUILD_TYPE = "Release"
-BUILD_SHARED_LIBS = "OFF"
-CMAKE_POSITION_INDEPENDENT_CODE = "ON"
-RUST_MIN_STACK = "33554432"
+linker = "C:\\Users\\Uni\\AppData\\Local\\Android\\Sdk\\ndk\\30.0.14904198\\toolchains\\llvm\\prebuilt\\windows-x86_64\\bin\\x86_64-linux-android24-clang.cmd"
+ar = "C:\\Users\\Uni\\AppData\\Local\\Android\\Sdk\\ndk\\30.0.14904198\\toolchains\\llvm\\prebuilt\\windows-x86_64\\bin\\llvm-ar.exe"

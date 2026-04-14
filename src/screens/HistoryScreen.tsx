@@ -38,7 +38,7 @@ export default function HistoryScreen() {
   }, [tab]);
 
   return (
-    <div className="flex flex-col h-full bg-[var(--npt-logo-bg)] safe-top safe-bottom">
+    <div className="flex flex-col h-full bg-[var(--npt-logo-bg)] safe-top">
       {/* Header */}
       <div className="flex items-center justify-between px-2 py-2">
         <div className="w-8" />

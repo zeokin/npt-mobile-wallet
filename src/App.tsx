@@ -37,7 +37,7 @@ export default function App() {
           position="top-center"
           toastOptions={{
             style: {
-              background: "var(--npt-card)",
+              background: "var(--npt-text)",
               color: "var(--npt-text)",
               border: "1px solid var(--npt-border)",
               borderRadius: "24px",
@@ -45,6 +45,7 @@ export default function App() {
               boxShadow: "0 4px 16px rgba(0,0,0,0.08)",
             },
             classNames: {
+              toast: "!bg-[var(--npt-card)]",
               success: "!bg-[var(--npt-success)] !text-white !border-transparent",
               error: "!bg-[var(--npt-error)] !text-white !border-transparent",
             },

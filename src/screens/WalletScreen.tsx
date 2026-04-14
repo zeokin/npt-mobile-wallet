@@ -24,10 +24,10 @@ function PendingBubble({ amount }: { amount: string }) {
   return (
     <div className="absolute left-1/2 -translate-x-1/2 top-0 flex flex-col items-center">
       <div className="bg-white/30 backdrop-blur-sm rounded-xl px-3 py-3">
-        <p className={`text-md font-bold ${(Number(amount) > 0.0) ? 'text-[var(--npt-error)]' : 'text-[var(--npt-pending)]'} text-center whitespace-nowrap`}>
+        <p className={`text-lg font-bold ${(Number(amount) > 0.0) ? 'text-[var(--npt-error)]' : 'text-[var(--npt-pending)]'} text-center whitespace-nowrap`}>
           {amount}NPT
         </p>
-        <p className="text-[14px] font-medium text-[var(--npt-warning)] text-center">
+        <p className="text-md font-medium text-[var(--npt-warning)] text-center">
           pending...
         </p>
       </div>
@@ -53,7 +53,7 @@ export default function WalletScreen() {
   const [syncing, setSyncing] = useState(false);
   const [_syncInfo, setSyncInfo] = useState<string | null>(null);
   const [pendingBlocked, setPendingBlocked] = useState(false);
-  
+
   const unspentUtxos = utxos.filter((u) => !u.likely_spent);
   const confirmedBalance = unspentUtxos.reduce((sum, u) => sum + (parseFloat(u.amount) || 0), 0);
   const pendingOutgoing = outgoingTxs
@@ -130,8 +130,10 @@ export default function WalletScreen() {
       setSyncInfo(
         `Found ${result.utxo_count} UTXOs in ${result.blocks_scanned} blocks`
       );
-      if (showToast && result.utxo_count > 0) {
-        toast.success(`Found ${result.utxo_count} UTXOs in ${result.blocks_scanned} blocks!`);
+      const existingIds = new Set(utxos.map(u => u.utxo_hex));
+      const newUtxos = result.utxos.filter(u => !existingIds.has(u.utxo_hex));
+      if (showToast && newUtxos.length > 0) {
+        toast.success(`Received ${newUtxos.length} new UTXO(s)!`);
       }
 
       const currentHeight = useSettingsStore.getState().blockHeight || 0;
@@ -207,7 +209,7 @@ export default function WalletScreen() {
     : "Generating...";
 
   return (
-    <div className="flex flex-col h-full bg-[var(--npt-blue)] safe-top safe-bottom">
+    <div className="flex flex-col h-full bg-[var(--npt-blue)] safe-top">
       <div className="flex items-center px-2 py-2">
         <h1 className="flex-1 text-center text-lg text-white font-semibold">My Wallet</h1>
       </div>
@@ -233,11 +235,11 @@ export default function WalletScreen() {
           <img
             src="/wave-chart.svg"
             alt=""
-            className="absolute left-1/2 -translate-x-1/2 left-0 min-w-full h-[185px] "
+            className="absolute left-1/2 -translate-x-1/2 left-0 min-w-full h-[225px] overflow-hidden"
           />
         </div>
 
-        <div className="h-1/8 z-10 py-6 px-2">
+        <div className="h-1/6 z-10 py-6 px-2 flex items-center">
           <button
             onClick={handleCopyAddress}
             className="w-full flex items-center gap-2 bg-white rounded-full px-4 py-2 shadow-xl border border-[var(--npt-border)] active:bg-gray-50 transition-colors"
@@ -248,7 +250,7 @@ export default function WalletScreen() {
             <Copy size={16} className="text-[var(--npt-text)] shrink-0" />
           </button>
         </div>
-        <div className={`h-1/4 bg-white rounded-t-2xl flex flex-col items-center gap-2 ${pendingBlocked ? 'justify-between pb-4' : 'justify-center'}`}>
+        <div className={`h-1/4 bg-white rounded-t-2xl flex flex-col items-center ${pendingBlocked ? 'gap-2 justify-between pb-4' : 'gap-6 justify-center'}`}>
 
 
           {/* Pending transaction banner */}
@@ -298,9 +300,9 @@ export default function WalletScreen() {
             <p className="text-xs text-[var(--npt-muted)]">{syncInfo}</p>
           )} */}
         </div>
-        <NavBar />
-      </div>
 
+      </div>
+      <NavBar />
       {/* White bottom section */}
 
 
