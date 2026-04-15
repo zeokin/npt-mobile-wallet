@@ -125,13 +125,20 @@ export default function WalletScreen() {
     setSyncInfo("Scanning blockchain...");
     try {
       const result = await syncWallet(null, 5);
+
+      // Snapshot existing UTXOs BEFORE updating the store
+      const existingIds = new Set(
+        useWalletStore.getState().utxos.map((u: any) => u.utxo_hex)
+      );
+
       setBalance(result.balance);
       setUtxos(result.utxos);
       setSyncInfo(
         `Found ${result.utxo_count} UTXOs in ${result.blocks_scanned} blocks`
       );
-      const existingIds = new Set(utxos.map(u => u.utxo_hex));
-      const newUtxos = result.utxos.filter(u => !existingIds.has(u.utxo_hex));
+
+      // Only toast for genuinely new UTXOs
+      const newUtxos = result.utxos.filter((u: any) => !existingIds.has(u.utxo_hex));
       if (showToast && newUtxos.length > 0) {
         toast.success(`Received ${newUtxos.length} new UTXO(s)!`);
       }

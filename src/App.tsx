@@ -36,18 +36,14 @@ export default function App() {
         <Toaster
           position="top-center"
           toastOptions={{
-            style: {
-              background: "var(--npt-text)",
-              color: "var(--npt-text)",
-              border: "1px solid var(--npt-border)",
-              borderRadius: "24px",
-              fontSize: "14px",
-              boxShadow: "0 4px 16px rgba(0,0,0,0.08)",
-            },
+            unstyled: true,
             classNames: {
-              toast: "!bg-[var(--npt-card)]",
-              success: "!bg-[var(--npt-success)] !text-white !border-transparent",
-              error: "!bg-[var(--npt-error)] !text-white !border-transparent",
+              toast:
+                "bg-[var(--npt-card)] text-[var(--npt-text)] border border-[var(--npt-border)] rounded-[24px] text-sm px-5 mt-10 py-2.5 shadow-[0_4px_16px_rgba(0,0,0,0.08)] flex items-center gap-2 w-full",
+              success:
+                "!bg-[var(--npt-success)] !text-white !border-transparent",
+              error:
+                "!bg-[var(--npt-error)] !text-white !border-transparent",
             },
           }}
         />

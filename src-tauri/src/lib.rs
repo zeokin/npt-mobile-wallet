@@ -17,7 +17,7 @@ const SESSION_TIMEOUT_SECS: u64 = 300;
 const MAX_PIN_ATTEMPTS: u32 = 5;
 
 /// Cooldown duration after max failed attempts (30 seconds).
-const PIN_COOLDOWN_SECS: u64 = 30;
+const PIN_COOLDOWN_SECS: u64 = 60;
 
 struct AppState {
     rpc: Mutex<Option<RpcClient>>,
@@ -101,7 +101,9 @@ fn unlock_wallet(
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     // Check PIN rate limiting
-    if let Some(until) = *state.lockout_until.lock().unwrap() {
+    // Note: extract value first so the MutexGuard is dropped before re-acquiring.
+    let lockout_until = *state.lockout_until.lock().unwrap();
+    if let Some(until) = lockout_until {
         let remaining = PIN_COOLDOWN_SECS.saturating_sub(until.elapsed().as_secs());
         if remaining > 0 {
             return Err(format!("Too many attempts. Wait {} seconds.", remaining));
@@ -882,6 +884,7 @@ async fn validate_address(
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_safe_area_insets_css::init())
         .manage(AppState {
             rpc: Mutex::new(None),
             wallet_unlocked: Mutex::new(false),
