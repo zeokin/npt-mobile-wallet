@@ -17,12 +17,12 @@ export default function NavBar() {
           <button
             key={path}
             onClick={() => navigate(path)}
-            className={`flex-1 flex flex-col items-center pt-2 pb-2 text-[12px] font-medium transition-colors ${
+            className={`flex-1 flex flex-col items-center pt-2 pb-1 text-[12px] font-medium transition-colors ${
               active ? "text-[var(--npt-blue)]" : "text-[var(--npt-muted)]"
             }`}
           >
-            <Icon size={24} strokeWidth={active ? 2.2 : 1.8} />
-            <span className="mt-1">{label}</span>
+            <Icon size={22} strokeWidth={active ? 2.2 : 1.8} />
+            <span className="mt-0.5">{label}</span>
           </button>
         );
       })}

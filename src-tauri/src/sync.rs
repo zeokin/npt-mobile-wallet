@@ -13,6 +13,8 @@
 //! are all parallelized. Wallet blocks are cached to avoid duplicate fetches.
 
 use neptune_cash::api::export::KeyType;
+use neptune_cash::application::config::network::Network;
+use neptune_cash::protocol::consensus::block::Block;
 use neptune_cash::state::wallet::address::announcement_flag::AnnouncementFlag;
 use neptune_cash::state::wallet::address::ReceivingAddress;
 use neptune_cash::state::wallet::address::SpendingKey;
@@ -59,6 +61,68 @@ pub struct SyncResult {
     pub utxos: Vec<DiscoveredUtxo>,
 }
 
+/// Check if any genesis block (premine) UTXOs belong to this wallet.
+///
+/// Premine UTXOs have no announcements, so the flag-based scan will never
+/// find them. Instead, we compare lock_script_hash of each premine UTXO
+/// against the wallet's receiving addresses.
+fn check_premine(
+    keys: &[(SpendingKey, u64, String)],
+    network: Network,
+) -> Vec<DiscoveredUtxo> {
+    let premine_utxos = Block::premine_utxos();
+    let sender_randomness = Block::premine_sender_randomness(network);
+
+    let mut found = Vec::new();
+
+    for (key, key_index, key_type) in keys {
+        // Get the receiving address's lock script hash for this key
+        let addr_lock_hash = match key {
+            SpendingKey::Generation(gsk) => {
+                let addr: ReceivingAddress = gsk.to_address().into();
+                addr.lock_script_hash()
+            }
+            SpendingKey::Symmetric(sk) => {
+                let addr: ReceivingAddress = sk.into();
+                addr.lock_script_hash()
+            }
+        };
+
+        for utxo in &premine_utxos {
+            if utxo.lock_script_hash() != addr_lock_hash {
+                continue;
+            }
+
+            debug_log!("[PREMINE] Found premine UTXO for {} key index {}", key_type, key_index);
+
+            let amount = format_utxo_amount(utxo);
+            let receiver_preimage = key.privacy_preimage();
+
+            let utxo_hex = hex::encode(bincode::serialize(utxo).unwrap_or_default());
+            let sr_hex = hex::encode(bincode::serialize(&sender_randomness).unwrap_or_default());
+            let rp_hex = hex::encode(bincode::serialize(&receiver_preimage).unwrap_or_default());
+
+            found.push(DiscoveredUtxo {
+                amount,
+                block_height: 0,
+                likely_spent: false,
+                key_type: key_type.clone(),
+                key_index: *key_index,
+                utxo_hex,
+                sender_randomness_hex: sr_hex,
+                receiver_preimage_hex: rp_hex,
+                aocl_leaf_index: None,
+            });
+        }
+    }
+
+    if !found.is_empty() {
+        debug_log!("[PREMINE] Discovered {} premine UTXO(s)", found.len());
+    }
+
+    found
+}
+
 /// Scan the blockchain for UTXOs belonging to this wallet.
 pub async fn scan_for_utxos(
     rpc: &RpcClient,
@@ -93,11 +157,15 @@ pub async fn scan_for_utxos(
         });
     }
 
+    // Step 1b: Check genesis block for premine UTXOs (no announcements, so flag scan won't find them)
+    // TODO: detect network from supporter connection instead of hardcoding
+    let premine_utxos = check_premine(&keys, Network::Main);
+
     // Step 2: Query supporter for block heights matching our flags (1 RPC call)
     let block_heights = rpc.block_heights_by_flags(&flags).await?;
-    eprintln!("[SYNC] Found {} candidate blocks", block_heights.len());
+    debug_log!("[SYNC] Found {} candidate blocks", block_heights.len());
 
-    if block_heights.is_empty() {
+    if block_heights.is_empty() && premine_utxos.is_empty() {
         return Ok(SyncResult {
             balance: "0".to_string(),
             utxo_count: 0,
@@ -107,7 +175,7 @@ pub async fn scan_for_utxos(
     }
 
     // Step 3: Fetch ALL block kernels in parallel
-    eprintln!("[SYNC] Fetching {} block kernels in parallel...", block_heights.len());
+    debug_log!("[SYNC] Fetching {} block kernels in parallel...", block_heights.len());
     let mut kernel_handles = Vec::new();
     for &height in &block_heights {
         let rpc_clone = rpc.clone();
@@ -126,37 +194,38 @@ pub async fn scan_for_utxos(
             None => continue,
         }
     }
-    eprintln!("[SYNC] Got {} block kernels", kernels.len());
+    debug_log!("[SYNC] Got {} block kernels", kernels.len());
 
     // Step 4: Decrypt announcements locally using spending keys
-    let mut discovered: Vec<DiscoveredUtxo> = Vec::new();
+    // Start with premine UTXOs (genesis block), then add announcement-discovered ones
+    let mut discovered: Vec<DiscoveredUtxo> = premine_utxos;
 
     for (height, kernel_json) in &kernels {
-        eprintln!("[DEBUG] kernel JSON keys: {:?}",
+        debug_log!("[DEBUG] kernel JSON keys: {:?}",
             kernel_json.as_object().map(|o| o.keys().collect::<Vec<_>>()));
         let announcements = kernel_json
             .get("announcements")
             .and_then(|a| a.as_array())
             .cloned()
             .unwrap_or_default();
-        eprintln!("[DEBUG] Found {} announcements in block {}", announcements.len(), height);
+        debug_log!("[DEBUG] Found {} announcements in block {}", announcements.len(), height);
 
         for announcement_val in &announcements {
             let msg = match parse_announcement_message(announcement_val) {
                 Some(m) => {
-                    eprintln!("[DEBUG] Parsed announcement: {} BFieldElements, first two: {:?}",
+                    debug_log!("[DEBUG] Parsed announcement: {} BFieldElements, first two: {:?}",
                         m.len(), m.iter().take(2).map(|b| b.value()).collect::<Vec<_>>());
                     m
                 }
                 None => {
-                    eprintln!("[DEBUG] Failed to parse announcement: {}",
+                    debug_log!("[DEBUG] Failed to parse announcement: {}",
                         serde_json::to_string(announcement_val).unwrap_or_default().chars().take(200).collect::<String>());
                     continue;
                 }
             };
 
             if msg.len() < 3 {
-                eprintln!("[DEBUG] Announcement too short: {} elements", msg.len());
+                debug_log!("[DEBUG] Announcement too short: {} elements", msg.len());
                 continue;
             }
 
@@ -202,7 +271,7 @@ pub async fn scan_for_utxos(
         }
     }
 
-    eprintln!("[SYNC] Discovered {} UTXOs, computing AOCL indices...", discovered.len());
+    debug_log!("[SYNC] Discovered {} UTXOs, computing AOCL indices...", discovered.len());
 
     if discovered.is_empty() {
         return Ok(SyncResult {
@@ -229,7 +298,7 @@ pub async fn scan_for_utxos(
         }
     }
 
-    eprintln!("[SYNC] Fetching {} wallet blocks in parallel (deduplicated)...", needed_heights.len());
+    debug_log!("[SYNC] Fetching {} wallet blocks in parallel (deduplicated)...", needed_heights.len());
     let mut block_handles = Vec::new();
     for &h in &needed_heights {
         let rpc_clone = rpc.clone();
@@ -254,7 +323,7 @@ pub async fn scan_for_utxos(
             }
         }
     }
-    eprintln!("[SYNC] Cached {} wallet blocks", block_cache.len());
+    debug_log!("[SYNC] Cached {} wallet blocks", block_cache.len());
 
     // Step 6: Compute AOCL indices using cached blocks, prepare bloom filter checks
     struct BloomCheck {
@@ -264,26 +333,28 @@ pub async fn scan_for_utxos(
     let mut bloom_checks: Vec<BloomCheck> = Vec::new();
 
     for (idx, utxo_data) in discovered.iter_mut().enumerate() {
-        if utxo_data.block_height == 0 {
-            continue;
-        }
-
-        let prev_height = utxo_data.block_height - 1;
         let cur_height = utxo_data.block_height;
 
-        let (prev_kernel, prev_hash) = match block_cache.get(&prev_height) {
-            Some(v) => v,
-            None => continue,
-        };
         let (cur_kernel, cur_hash) = match block_cache.get(&cur_height) {
             Some(v) => v,
             None => continue,
         };
 
-        // Compute prev block AOCL leaf count
-        let prev_aocl = match prev_kernel.guesser_fee_addition_records(*prev_hash) {
-            Ok(gf) => prev_kernel.body.mutator_set_accumulator_after(gf).aocl.num_leafs(),
-            Err(_) => continue,
+        // Compute prev block AOCL leaf count.
+        // For genesis block (height 0): AOCL starts empty, so prev_aocl = 0.
+        // For all other blocks: compute from previous block's mutator set.
+        let prev_aocl = if cur_height == 0 {
+            0u64
+        } else {
+            let prev_height = cur_height - 1;
+            let (prev_kernel, prev_hash) = match block_cache.get(&prev_height) {
+                Some(v) => v,
+                None => continue,
+            };
+            match prev_kernel.guesser_fee_addition_records(*prev_hash) {
+                Ok(gf) => prev_kernel.body.mutator_set_accumulator_after(gf).aocl.num_leafs(),
+                Err(_) => continue,
+            }
         };
 
         // Get all addition records from current block
@@ -340,12 +411,12 @@ pub async fn scan_for_utxos(
             }
         }
         if !found {
-            eprintln!("[SYNC] Warning: UTXO at index {} not found in block {} additions", idx, cur_height);
+            debug_log!("[SYNC] Warning: UTXO at index {} not found in block {} additions", idx, cur_height);
         }
     }
 
     // Step 7: Run all bloom filter checks in parallel
-    eprintln!("[SYNC] Running {} bloom filter checks in parallel...", bloom_checks.len());
+    debug_log!("[SYNC] Running {} bloom filter checks in parallel...", bloom_checks.len());
     let mut bloom_handles = Vec::new();
     for check in bloom_checks {
         let rpc_clone = rpc.clone();
@@ -371,7 +442,7 @@ pub async fn scan_for_utxos(
         format!("{} UTXOs ({})", unspent.len(), amounts.join(" + "))
     };
 
-    eprintln!("[SYNC] Done: {} UTXOs ({} unspent)", discovered.len(), unspent.len());
+    debug_log!("[SYNC] Done: {} UTXOs ({} unspent)", discovered.len(), unspent.len());
 
     Ok(SyncResult {
         balance,

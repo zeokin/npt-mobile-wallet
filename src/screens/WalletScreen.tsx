@@ -257,7 +257,7 @@ export default function WalletScreen() {
             <Copy size={16} className="text-[var(--npt-text)] shrink-0" />
           </button>
         </div>
-        <div className={`h-1/4 bg-white rounded-t-2xl flex flex-col items-center ${pendingBlocked ? 'gap-2 justify-between pb-4' : 'gap-6 justify-center'}`}>
+        <div className={`h-1/4 z-10 bg-white rounded-t-2xl flex flex-col items-center ${pendingBlocked ? 'gap-2 justify-between pb-4' : 'gap-6 justify-center'}`}>
 
 
           {/* Pending transaction banner */}

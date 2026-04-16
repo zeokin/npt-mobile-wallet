@@ -62,6 +62,8 @@ opt-level = 1
 lto = true
 opt-level = 3
 codegen-units = 1
+panic = "abort"
+strip = true
 
 [profile.release.package.triton-vm]
 opt-level = 3

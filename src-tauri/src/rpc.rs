@@ -72,7 +72,7 @@ impl RpcClient {
             .map_err(|e| format!("Invalid response: {}", e))?;
 
         if let Some(err) = rpc_resp.error {
-            eprintln!("[DEBUG] RPC error for method '{}': code={}, message='{}'", method, err.code, err.message);
+            debug_log!("[DEBUG] RPC error for method '{}': code={}, message='{}'", method, err.code, err.message);
             return Err(format!("RPC error {}: {}", err.code, err.message));
         }
 
@@ -226,13 +226,13 @@ impl RpcClient {
         let params = serde_json::to_value(&request)
             .map_err(|e| format!("Serialize request: {}", e))?;
 
-        eprintln!("[DEBUG] blockHeightsByFlags params: {}",
+        debug_log!("[DEBUG] blockHeightsByFlags params: {}",
             serde_json::to_string(&params).unwrap_or_default());
 
         let result = match self.call("utxoindex_blockHeightsByFlags", params).await {
             Ok(r) => r,
             Err(e) => {
-                eprintln!("[DEBUG] blockHeightsByFlags error: {}", e);
+                debug_log!("[DEBUG] blockHeightsByFlags error: {}", e);
                 // If utxoindex is not available, return empty — the UTXO index
                 // namespace might not be enabled on this supporter
                 if e.contains("-32601") || e.contains("Method not found") {
@@ -274,7 +274,7 @@ impl RpcClient {
         let params = serde_json::to_value(&request)
             .map_err(|e| format!("Serialize request: {}", e))?;
 
-        eprintln!("[DEBUG] getBlockTransactionKernel params: {}",
+        debug_log!("[DEBUG] getBlockTransactionKernel params: {}",
             serde_json::to_string(&params).unwrap_or_default());
 
         let result = self

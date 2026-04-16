@@ -1,3 +1,14 @@
+/// Debug-only logging macro. Compiles to nothing in release builds,
+/// preventing any sensitive data from reaching logcat/stderr.
+#[cfg(debug_assertions)]
+macro_rules! debug_log {
+    ($($arg:tt)*) => { eprintln!($($arg)*) }
+}
+#[cfg(not(debug_assertions))]
+macro_rules! debug_log {
+    ($($arg:tt)*) => {}
+}
+
 mod keys;
 mod rpc;
 mod seed;
@@ -9,6 +20,7 @@ use serde::Serialize;
 use std::sync::Mutex;
 use std::time::Instant;
 use tauri::{Manager, State};
+use zeroize::Zeroize;
 
 /// Session auto-lock after 5 minutes of inactivity.
 const SESSION_TIMEOUT_SECS: u64 = 300;
@@ -16,7 +28,7 @@ const SESSION_TIMEOUT_SECS: u64 = 300;
 /// Max failed PIN attempts before cooldown.
 const MAX_PIN_ATTEMPTS: u32 = 5;
 
-/// Cooldown duration after max failed attempts (30 seconds).
+/// Cooldown duration after max failed attempts (60 seconds).
 const PIN_COOLDOWN_SECS: u64 = 60;
 
 struct AppState {
@@ -56,10 +68,20 @@ fn check_session(state: &State<'_, AppState>) -> Result<(), String> {
     if let Some(last) = *state.last_activity.lock().unwrap() {
         if last.elapsed().as_secs() > SESSION_TIMEOUT_SECS {
             *state.wallet_unlocked.lock().unwrap() = false;
+            set_cached_pin(state, None);
             return Err("Session expired — please unlock again".to_string());
         }
     }
     Ok(())
+}
+
+/// Set the cached PIN, zeroizing any previous value first.
+fn set_cached_pin(state: &State<'_, AppState>, new_pin: Option<String>) {
+    let mut guard = state.cached_pin.lock().unwrap();
+    if let Some(ref mut old) = *guard {
+        old.zeroize();
+    }
+    *guard = new_pin;
 }
 
 // ── Seed / Wallet Commands ───────────────────────────────────
@@ -70,8 +92,19 @@ fn wallet_exists(app: tauri::AppHandle) -> Result<bool, String> {
     Ok(seed::seed_exists(&path))
 }
 
+/// Minimum password length enforced at the backend boundary.
+const MIN_PASSWORD_LEN: usize = 8;
+
+fn validate_password(pin: &str) -> Result<(), String> {
+    if pin.len() < MIN_PASSWORD_LEN {
+        return Err(format!("Password must be at least {} characters", MIN_PASSWORD_LEN));
+    }
+    Ok(())
+}
+
 #[tauri::command]
 fn create_wallet(app: tauri::AppHandle, pin: String) -> Result<Vec<String>, String> {
+    validate_password(&pin)?;
     let path = seed::seed_file_path(&app)?;
     if seed::seed_exists(&path) {
         return Err("Wallet already exists".to_string());
@@ -86,6 +119,7 @@ fn create_wallet(app: tauri::AppHandle, pin: String) -> Result<Vec<String>, Stri
 
 #[tauri::command]
 fn import_wallet(app: tauri::AppHandle, words: String, pin: String) -> Result<(), String> {
+    validate_password(&pin)?;
     let path = seed::seed_file_path(&app)?;
     let mnemonic = seed::validate_mnemonic(&words)?;
     let entropy = seed::mnemonic_to_entropy(&mnemonic);
@@ -128,7 +162,7 @@ fn unlock_wallet(
             }
 
             *state.wallet_unlocked.lock().unwrap() = true;
-            *state.cached_pin.lock().unwrap() = Some(pin);
+            set_cached_pin(&state, Some(pin));
             touch_session(&state);
             Ok(())
         }
@@ -152,7 +186,7 @@ fn unlock_wallet(
 #[tauri::command]
 fn lock_wallet(state: State<'_, AppState>) -> Result<(), String> {
     *state.wallet_unlocked.lock().unwrap() = false;
-    *state.cached_pin.lock().unwrap() = None;
+    set_cached_pin(&state, None);
     *state.last_activity.lock().unwrap() = None;
     Ok(())
 }
@@ -288,7 +322,7 @@ async fn send_transaction(
     .map_err(|e| format!("Invalid address: {}", e))?;
 
     // Step 1: Re-scan to get fresh UTXOs with spending data
-    eprintln!("[SEND] Step 1: Scanning for UTXOs...");
+    debug_log!("[SEND] Step 1: Scanning for UTXOs...");
     let sync_result = sync::scan_for_utxos(&rpc, &entropy, 5, 1).await?;
     let unspent_utxos: Vec<_> = sync_result.utxos.iter().filter(|u| !u.likely_spent).collect();
     if unspent_utxos.is_empty() {
@@ -314,7 +348,7 @@ async fn send_transaction(
     let total_needed = amount_val.checked_add(&fee_val).ok_or("Amount + fee overflow")?;
 
     // Step 2: Select UTXOs to cover amount (smallest-first strategy)
-    eprintln!("[SEND] Step 2: Selecting UTXOs...");
+    debug_log!("[SEND] Step 2: Selecting UTXOs...");
 
     // Deserialize all unspent UTXOs with their amounts
     struct UtxoInput {
@@ -369,11 +403,11 @@ async fn send_transaction(
         ));
     }
 
-    eprintln!("[SEND] Selected {} UTXOs totaling {} to cover {}",
+    debug_log!("[SEND] Selected {} UTXOs totaling {} to cover {}",
         selected.len(), accumulated, total_needed);
 
     // Step 3: Get chain tip
-    eprintln!("[SEND] Step 3: Getting chain tip...");
+    debug_log!("[SEND] Step 3: Getting chain tip...");
     let tip_json = rpc.get_tip().await?;
     let tip_height = tip_json
         .get("block")
@@ -382,7 +416,7 @@ async fn send_transaction(
         .and_then(|h| h.get("height"))
         .and_then(|h| h.as_u64())
         .ok_or("Cannot parse tip height")?;
-    eprintln!("[SEND] Chain tip at height {}", tip_height);
+    debug_log!("[SEND] Chain tip at height {}", tip_height);
 
     // Helper: parse wallet blocks
     fn parse_wallet_blocks(json: &serde_json::Value) -> Result<Vec<(BlockKernel, neptune_cash::prelude::triton_vm::prelude::Digest)>, String> {
@@ -397,14 +431,14 @@ async fn send_transaction(
     }
 
     // Step 4-7: For EACH selected UTXO: compute AOCL index, get membership proof, unlock
-    eprintln!("[SEND] Steps 4-7: Processing {} inputs...", selected.len());
+    debug_log!("[SEND] Steps 4-7: Processing {} inputs...", selected.len());
     let mut all_abs_index_sets = Vec::new();
     let mut all_aocl_indices = Vec::new();
 
     // Compute AOCL index and AbsoluteIndexSet for each input
     for (idx, input) in selected.iter().enumerate() {
         let block_height = input.data.block_height;
-        eprintln!("[SEND] Input {}: block {}, amount {}", idx, block_height, input.amount);
+        debug_log!("[SEND] Input {}: block {}, amount {}", idx, block_height, input.amount);
 
         // Get previous block AOCL count
         let prev_json = rpc.get_wallet_blocks(block_height - 1, block_height - 1).await?;
@@ -434,7 +468,7 @@ async fn send_transaction(
         ).ok_or(format!("UTXO not found in block {} additions", block_height))?;
 
         let aocl_idx = prev_aocl + position as u64;
-        eprintln!("[SEND] Input {}: AOCL index {} (prev {} + pos {})", idx, aocl_idx, prev_aocl, position);
+        debug_log!("[SEND] Input {}: AOCL index {} (prev {} + pos {})", idx, aocl_idx, prev_aocl, position);
 
         let abs_set = AbsoluteIndexSet::compute(
             utxo_hash, input.sender_randomness, input.receiver_preimage, aocl_idx,
@@ -444,7 +478,7 @@ async fn send_transaction(
     }
 
     // Batch restore membership proofs for ALL inputs
-    eprintln!("[SEND] Step 6: Restoring {} membership proofs...", all_abs_index_sets.len());
+    debug_log!("[SEND] Step 6: Restoring {} membership proofs...", all_abs_index_sets.len());
     let restore_request = RestoreMembershipProofRequest {
         absolute_index_sets: all_abs_index_sets,
     };
@@ -459,7 +493,7 @@ async fn send_transaction(
     let tip_msa: MutatorSetAccumulator = snapshot.synced_mutator_set.into();
 
     // Create UnlockedUtxo for each input
-    eprintln!("[SEND] Step 7: Creating {} UnlockedUtxos...", selected.len());
+    debug_log!("[SEND] Step 7: Creating {} UnlockedUtxos...", selected.len());
     let mut unlocked_utxos = Vec::new();
     for (idx, (input, proof_data)) in selected.iter()
         .zip(snapshot.membership_proofs.into_iter())
@@ -489,10 +523,10 @@ async fn send_transaction(
             membership_proof,
         ));
     }
-    eprintln!("[SEND] {} UnlockedUtxos created", unlocked_utxos.len());
+    debug_log!("[SEND] {} UnlockedUtxos created", unlocked_utxos.len());
 
     // Step 8: Build outputs
-    eprintln!("[SEND] Step 8: Building outputs...");
+    debug_log!("[SEND] Step 8: Building outputs...");
     let tip_block_height = BlockHeight::from(tip_height);
     let change_key = neptune_cash::state::wallet::address::SpendingKey::Symmetric(
         entropy.nth_symmetric_key(0)
@@ -522,18 +556,18 @@ async fn send_transaction(
             tx_outputs.push(change_output);
         }
     }
-    eprintln!("[SEND] {} outputs created", tx_outputs.len());
+    debug_log!("[SEND] {} outputs created", tx_outputs.len());
 
     // Step 9: Build TransactionDetails
-    eprintln!("[SEND] Step 9: Building TransactionDetails...");
+    debug_log!("[SEND] Step 9: Building TransactionDetails...");
     let timestamp = Timestamp::now();
     let transaction_details = neptune_cash::api::export::TransactionDetails::new_without_coinbase(
         unlocked_utxos, tx_outputs, fee_val, timestamp, tip_msa, network,
     );
-    eprintln!("[SEND] TransactionDetails built ({} inputs)", selected.len());
+    debug_log!("[SEND] TransactionDetails built ({} inputs)", selected.len());
 
     // Step 9.5: Validate membership proof before expensive proof generation
-    eprintln!("[SEND] Step 9.5: Validating membership proof...");
+    debug_log!("[SEND] Step 9.5: Validating membership proof...");
     {
         let msa = &transaction_details.mutator_set_accumulator;
         let pw = transaction_details.primitive_witness();
@@ -544,7 +578,7 @@ async fn send_transaction(
         {
             let item = Tip5::hash(&input.utxo);
             let is_valid = msa.verify(item, proof);
-            eprintln!("[SEND] Input {} membership proof valid: {}", idx, is_valid);
+            debug_log!("[SEND] Input {} membership proof valid: {}", idx, is_valid);
             if !is_valid {
                 return Err(format!(
                     "Membership proof validation failed for input {}. \
@@ -553,14 +587,14 @@ async fn send_transaction(
                 ));
             }
         }
-        eprintln!("[SEND] All {} membership proofs valid", selected.len());
+        debug_log!("[SEND] All {} membership proofs valid", selected.len());
 
         // Full validation — checks removal records, lock scripts, amounts
-        eprintln!("[SEND] Running full transaction validation...");
+        debug_log!("[SEND] Running full transaction validation...");
         match tokio::task::spawn_blocking(move || {
             tokio::runtime::Handle::current().block_on(pw.validate())
         }).await {
-            Ok(Ok(())) => eprintln!("[SEND] Full validation PASSED"),
+            Ok(Ok(())) => debug_log!("[SEND] Full validation PASSED"),
             Ok(Err(e)) => {
                 return Err(format!("Transaction validation FAILED: {:?}", e));
             }
@@ -573,15 +607,15 @@ async fn send_transaction(
     // Step 10: Generate ProofCollection (THIS IS THE SLOW STEP)
     // Keep session alive during long proof generation
     *state.last_activity.lock().unwrap() = Some(Instant::now());
-    eprintln!("[SEND] Step 10: Generating ProofCollection — this may take several minutes...");
+    debug_log!("[SEND] Step 10: Generating ProofCollection — this may take several minutes...");
     let tx = transaction::build_transaction(&transaction_details).await
         .map_err(|e| format!("ProofCollection failed: {}", e))?;
     // Keep session alive after proof generation
     *state.last_activity.lock().unwrap() = Some(Instant::now());
-    eprintln!("[SEND] Transaction built!");
+    debug_log!("[SEND] Transaction built!");
 
     // Step 11: Submit transaction
-    eprintln!("[SEND] Step 11: Submitting transaction...");
+    debug_log!("[SEND] Step 11: Submitting transaction...");
     let rpc_tx: neptune_cash::application::json_rpc::core::model::wallet::transaction::RpcTransaction = tx.try_into()
         .map_err(|e: String| format!("Convert to RPC transaction: {}", e))?;
     use neptune_cash::application::json_rpc::core::model::message::SubmitTransactionRequest;
@@ -589,7 +623,7 @@ async fn send_transaction(
     let submit_params = serde_json::to_value(&submit_request)
         .map_err(|e| format!("Serialize submit request: {}", e))?;
     let submit_result = rpc.submit_transaction(&submit_params).await?;
-    eprintln!("[SEND] Submitted! Response: {}", submit_result);
+    debug_log!("[SEND] Submitted! Response: {}", submit_result);
 
     // Return addition records as JSON for tracking confirmation via wasMined
     use neptune_cash::application::json_rpc::core::model::block::transaction_kernel::RpcAdditionRecord;
@@ -600,7 +634,7 @@ async fn send_transaction(
             serde_json::to_string(&rpc_ar).unwrap_or_default()
         })
         .collect();
-    eprintln!("[SEND] Output addition records ({} outputs): {:?}",
+    debug_log!("[SEND] Output addition records ({} outputs): {:?}",
         addition_jsons.len(), addition_jsons);
 
     // Mark pending — blocks further sends until confirmed or cleared
@@ -620,7 +654,7 @@ async fn send_transaction(
             dir.join("pending_tx.json"),
             serde_json::to_string_pretty(&pending_data).unwrap_or_default(),
         );
-        eprintln!("[SEND] Pending state persisted to disk");
+        debug_log!("[SEND] Pending state persisted to disk");
     }
 
     let result = serde_json::json!({
@@ -677,7 +711,7 @@ async fn check_transaction_mined(
             .map_err(|e| format!("Deserialize RpcAdditionRecord: {} from '{}'", e, json_str))?;
         addition_records.push(ar);
     }
-    eprintln!("[CHECK_MINED] Checking {} addition records", addition_records.len());
+    debug_log!("[CHECK_MINED] Checking {} addition records", addition_records.len());
 
     let request = WasMinedRequest {
         absolute_index_sets: vec![], // we're checking outputs, not inputs
@@ -687,7 +721,7 @@ async fn check_transaction_mined(
         .map_err(|e| format!("Serialize: {}", e))?;
 
     let result = rpc.was_mined(&params).await?;
-    eprintln!("[CHECK_MINED] Response: {}", serde_json::to_string(&result).unwrap_or_default());
+    debug_log!("[CHECK_MINED] Response: {}", serde_json::to_string(&result).unwrap_or_default());
 
     let heights: Vec<u64> = result.get("blockHeights")
         .or_else(|| result.get("block_heights"))
@@ -695,7 +729,7 @@ async fn check_transaction_mined(
         .map(|arr| arr.iter().filter_map(|v| v.as_u64()).collect())
         .unwrap_or_default();
 
-    eprintln!("[CHECK_MINED] Block heights: {:?}", heights);
+    debug_log!("[CHECK_MINED] Block heights: {:?}", heights);
 
     // Auto-clear pending flag when transaction is confirmed (memory + disk)
     if !heights.is_empty() {
@@ -703,7 +737,7 @@ async fn check_transaction_mined(
         if let Ok(dir) = app.path().app_data_dir() {
             let _ = std::fs::remove_file(dir.join("pending_tx.json"));
         }
-        eprintln!("[CHECK_MINED] Transaction confirmed — pending flag cleared (memory + disk)");
+        debug_log!("[CHECK_MINED] Transaction confirmed — pending flag cleared (memory + disk)");
     }
 
     Ok(heights)
@@ -723,7 +757,7 @@ fn has_pending_tx(app: tauri::AppHandle, state: State<'_, AppState>) -> bool {
         if path.exists() {
             // Restore in-memory flag from disk
             *state.has_pending_tx.lock().unwrap() = true;
-            eprintln!("[PENDING] Restored pending flag from disk");
+            debug_log!("[PENDING] Restored pending flag from disk");
             return true;
         }
     }
@@ -753,7 +787,7 @@ fn clear_pending_tx(app: tauri::AppHandle, state: State<'_, AppState>) {
     if let Ok(dir) = app.path().app_data_dir() {
         let _ = std::fs::remove_file(dir.join("pending_tx.json"));
     }
-    eprintln!("[PENDING] Pending flag cleared (memory + disk)");
+    debug_log!("[PENDING] Pending flag cleared (memory + disk)");
 }
 
 /// Scan the blockchain for UTXOs belonging to this wallet.
