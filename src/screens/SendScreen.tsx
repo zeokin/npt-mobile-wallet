@@ -221,42 +221,13 @@ export default function SendScreen() {
                 </div>
               </div>
 
-              {/* Confirm password sheet */}
-              {step === "confirm" && (
-                <div className="absolute w-full left-0 bottom-0 animate-slide-up bg-[var(--npt-blue)] rounded-t-xl p-4 space-y-3">
-                  <label className="block text-sm font-medium text-[var(--npt-white)]">Confirm password</label>
-                  <div className="flex items-center bg-white rounded-full border border-[var(--npt-border)] px-4">
-                    <input
-                      type={showPin ? "text" : "password"}
-                      value={pin}
-                      autoFocus
-                      onChange={(e) => setPin(e.target.value)}
-                      onKeyDown={(e) => e.key === "Enter" && handleSend()}
-                      className="flex-1 py-1 bg-transparent text-[var(--npt-text)] focus:outline-none"
-                    />
-                    <button onClick={() => setShowPin(!showPin)} className="text-[var(--npt-muted)]">
-                      {showPin ? <EyeOff size={18} /> : <Eye size={18} />}
-                    </button>
-                  </div>
-                  <div className="flex justify-center">
-                    <button
-                    onClick={handleSend}
-                    disabled={!pin || loading}
-                    className="w-1/2 py-1 rounded-full bg-[var(--npt-white)] text-[var(--npt-blue)] font-semibold disabled:opacity-50 active:opacity-90"
-                  >
-                    Send
-                  </button>
-                </div>
-                </div>
-              )}
-
               {/* Continue button */}
               {step === "form" && (
                 <div className="flex justify-center">
                   <button
                     onClick={handleNext}
                     disabled={!canSend}
-                    className="w-1/2 py-1 rounded-full bg-[var(--npt-blue)] text-white font-semibold disabled:opacity-90 disabled:bg- active:opacity-90 transition-opacity"
+                    className="w-1/2 py-1 rounded-full bg-[var(--npt-blue)] text-white font-semibold disabled:opacity-50 disabled:bg-[var(--npt-muted)] disabled:cursor-not-allowed active:opacity-90 transition-opacity"
                   >
                     Continue
                   </button>
@@ -266,6 +237,62 @@ export default function SendScreen() {
           )}
         </div>
       </div>
+
+      {/* Password confirmation modal */}
+      {step === "confirm" && (
+        <div
+          className="fixed inset-0 z-40 bg-black/50 flex items-start justify-center pt-20 px-4"
+          onClick={() => setStep("form")}
+        >
+          <div
+            className="w-full max-w-sm bg-white rounded-2xl p-5 space-y-3 shadow-2xl animate-fade-in"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="text-lg font-semibold text-[var(--npt-text)] text-center">
+              Confirm password
+            </h3>
+            <p className="text-xs text-[var(--npt-muted)] text-center">
+              Enter your password to authorize sending {amount} NPT
+            </p>
+            <div className="flex items-center bg-[var(--npt-logo-bg)] rounded-full border border-[var(--npt-border)] px-4">
+              <input
+                type={showPin ? "text" : "password"}
+                value={pin}
+                autoFocus
+                placeholder="Password"
+                onChange={(e) => setPin(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && handleSend()}
+                className="flex-1 py-2 bg-transparent text-[var(--npt-text)] focus:outline-none"
+              />
+              <button
+                onClick={() => setShowPin(!showPin)}
+                className="text-[var(--npt-muted)]"
+              >
+                {showPin ? <EyeOff size={18} /> : <Eye size={18} />}
+              </button>
+            </div>
+            <div className="flex gap-2 pt-1">
+              <button
+                onClick={() => {
+                  setPin("");
+                  setStep("form");
+                }}
+                disabled={loading}
+                className="flex-1 py-2 rounded-full bg-[var(--npt-logo-bg)] text-[var(--npt-text)] font-medium active:opacity-80"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSend}
+                disabled={!pin || loading}
+                className="flex-1 py-2 rounded-full bg-[var(--npt-blue)] text-white font-semibold disabled:opacity-50 active:opacity-90"
+              >
+                Send
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Full-screen building overlay — blocks all interaction */}
       {step === "building" && (
