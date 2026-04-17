@@ -16,8 +16,9 @@
   --npt-warning: #FDB32A;
   --npt-pending: #FDB32A;
 
-  --safe-top: env(safe-area-inset-top, 0px);
-  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  /* Plugin sets --safe-area-inset-top/bottom via JS; env() is browser fallback for iOS */
+  --safe-top: var(--safe-area-inset-top, env(safe-area-inset-top, 0px));
+  --safe-bottom: var(--safe-area-inset-bottom, env(safe-area-inset-bottom, 0px));
   --safe-left: env(safe-area-inset-left, 0px);
   --safe-right: env(safe-area-inset-right, 0px);
 }
@@ -100,10 +101,3 @@ input::-webkit-textfield-decoration-container {
   animation: slide-up 0.3s ease-out;
 }
 
-/* Toast overrides for pill shape */
-[data-sonner-toaster] [data-sonner-toast] {
-  border-radius: 24px !important;
-  font-size: 14px !important;
-  padding: 10px 20px !important;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1) !important;
-}

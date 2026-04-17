@@ -38,7 +38,7 @@ export default function HistoryScreen() {
   }, [tab]);
 
   return (
-    <div className="flex flex-col h-full bg-[var(--npt-logo-bg)] safe-top safe-bottom">
+    <div className="flex flex-col h-full bg-[var(--npt-logo-bg)] safe-top">
       {/* Header */}
       <div className="flex items-center justify-between px-2 py-2">
         <div className="w-8" />
@@ -107,10 +107,17 @@ export default function HistoryScreen() {
               {/* Block info */}
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-1">
-                  <span className="text-sm text-[var(--npt-text)]">Block</span>
-                  <span className="text-sm font-semibold text-[var(--npt-blue)]">{utxo.block_height}</span>
+                  <span className="text-sm text-[var(--npt-text)]">Received</span>
+                  <span className="text-sm font-semibold text-[var(--npt-blue)]">#{utxo.block_height}</span>
                 </div>
-                <span className="text-xs text-[var(--npt-muted)] capitalize">{utxo.key_type}</span>
+                {utxo.spent_in_block !== null && utxo.spent_in_block !== undefined ? (
+                  <div className="flex items-center gap-1">
+                    <span className="text-xs text-[var(--npt-error)]">Spent</span>
+                    <span className="text-xs font-semibold text-[var(--npt-error)]">#{utxo.spent_in_block}</span>
+                  </div>
+                ) : (
+                  <span className="text-xs text-[var(--npt-muted)] capitalize">{utxo.key_type}</span>
+                )}
               </div>
 
               {/* Amount */}

@@ -32,6 +32,7 @@ export interface DiscoveredUtxo {
   amount: string;
   block_height: number;
   likely_spent: boolean;
+  spent_in_block: number | null;
   key_type: string;
   key_index: number;
   utxo_hex: string;

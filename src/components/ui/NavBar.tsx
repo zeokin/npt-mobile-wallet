@@ -17,7 +17,7 @@ export default function NavBar() {
           <button
             key={path}
             onClick={() => navigate(path)}
-            className={`flex-1 flex flex-col items-center pt-2 pb-1 text-[11px] font-medium transition-colors ${
+            className={`flex-1 flex flex-col items-center pt-2 pb-1 text-[12px] font-medium transition-colors ${
               active ? "text-[var(--npt-blue)]" : "text-[var(--npt-muted)]"
             }`}
           >

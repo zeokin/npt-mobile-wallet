@@ -30,7 +30,7 @@ export default function SettingsScreen() {
   };
 
   return (
-    <div className="flex flex-col h-full bg-[var(--npt-log-bg)] safe-top safe-bottom">
+    <div className="flex flex-col h-full bg-[var(--npt-log-bg)] safe-top">
       {/* Header */}
       <div className="flex items-center justify-center px-2 py-2">
         <h1 className="text-lg font-bold text-[var(--npt-text)]">Settings</h1>
