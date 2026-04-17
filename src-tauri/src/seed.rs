@@ -41,7 +41,27 @@ pub fn generate_mnemonic() -> Result<Mnemonic, String> {
 /// Validate a mnemonic string (must be 18 words).
 pub fn validate_mnemonic(words: &str) -> Result<Mnemonic, String> {
     let m = Mnemonic::parse_in(Language::English, words)
-        .map_err(|e| format!("Invalid mnemonic: {}", e))?;
+        .map_err(|e| {
+            // bip39 crate reports word positions as 0-indexed.
+            // Convert to 1-indexed for the UI ("word 16" -> "word 17").
+            let msg = e.to_string();
+            let fixed = match msg.find("(word ") {
+                Some(start) => {
+                    let after = &msg[start + 6..];
+                    if let Some(end) = after.find(')') {
+                        if let Ok(n) = after[..end].parse::<usize>() {
+                            format!("{}{}{}", &msg[..start + 6], n + 1, &msg[start + 6 + end..])
+                        } else {
+                            msg
+                        }
+                    } else {
+                        msg
+                    }
+                }
+                None => msg,
+            };
+            format!("Invalid mnemonic: {}", fixed)
+        })?;
     let word_count = words.split_whitespace().count();
     if word_count != 18 {
         return Err(format!("Expected 18 words, got {}", word_count));

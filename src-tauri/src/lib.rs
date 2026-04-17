@@ -6,7 +6,7 @@ macro_rules! debug_log {
 }
 #[cfg(not(debug_assertions))]
 macro_rules! debug_log {
-    ($($arg:tt)*) => {}
+    ($($arg:tt)*) => { () }
 }
 
 mod keys;
@@ -22,8 +22,8 @@ use std::time::Instant;
 use tauri::{Manager, State};
 use zeroize::Zeroize;
 
-/// Session auto-lock after 5 minutes of inactivity.
-const SESSION_TIMEOUT_SECS: u64 = 300;
+/// Session auto-lock after 3 minutes of inactivity.
+const SESSION_TIMEOUT_SECS: u64 = 180;
 
 /// Max failed PIN attempts before cooldown.
 const MAX_PIN_ATTEMPTS: u32 = 5;
@@ -440,21 +440,36 @@ async fn send_transaction(
         let block_height = input.data.block_height;
         debug_log!("[SEND] Input {}: block {}, amount {}", idx, block_height, input.amount);
 
-        // Get previous block AOCL count
-        let prev_json = rpc.get_wallet_blocks(block_height - 1, block_height - 1).await?;
-        let prev_blocks = parse_wallet_blocks(&prev_json)?;
-        let (prev_kernel, prev_hash) = prev_blocks.into_iter().next().ok_or("No prev block")?;
-        let prev_gf = prev_kernel.guesser_fee_addition_records(prev_hash)
-            .map_err(|e| format!("Guesser fees: {}", e))?;
-        let prev_msa = prev_kernel.body.mutator_set_accumulator_after(prev_gf);
-        let prev_aocl = prev_msa.aocl.num_leafs();
+        // Get previous block AOCL count.
+        // For genesis block (height 0): AOCL starts empty, so prev_aocl = 0.
+        let prev_aocl = if block_height == 0 {
+            0u64
+        } else {
+            let prev_json = rpc.get_wallet_blocks(block_height - 1, block_height - 1).await?;
+            let prev_blocks = parse_wallet_blocks(&prev_json)?;
+            let (prev_kernel, prev_hash) = prev_blocks.into_iter().next().ok_or("No prev block")?;
+            let prev_gf = prev_kernel.guesser_fee_addition_records(prev_hash)
+                .map_err(|e| format!("Guesser fees: {}", e))?;
+            let prev_msa = prev_kernel.body.mutator_set_accumulator_after(prev_gf);
+            prev_msa.aocl.num_leafs()
+        };
 
-        // Get block additions
-        let block_json = rpc.get_wallet_blocks(block_height, block_height).await?;
-        let blocks = parse_wallet_blocks(&block_json)?;
-        let (kernel, hash) = blocks.into_iter().next().ok_or("No block")?;
-        let all_additions = kernel.all_addition_records(hash)
-            .map_err(|e| format!("Addition records: {}", e))?;
+        // Get block additions.
+        // For genesis block (height 0): fetch locally since supporter may not serve it via RPC.
+        let all_additions = if block_height == 0 {
+            use neptune_cash::protocol::consensus::block::Block;
+            use neptune_cash::application::config::network::Network;
+            let genesis = Block::genesis(Network::Main);
+            let genesis_hash = genesis.hash();
+            genesis.kernel.all_addition_records(genesis_hash)
+                .map_err(|e| format!("Genesis addition records: {}", e))?
+        } else {
+            let block_json = rpc.get_wallet_blocks(block_height, block_height).await?;
+            let blocks = parse_wallet_blocks(&block_json)?;
+            let (kernel, hash) = blocks.into_iter().next().ok_or("No block")?;
+            kernel.all_addition_records(hash)
+                .map_err(|e| format!("Addition records: {}", e))?
+        };
 
         // Find our commitment
         let utxo_hash = Tip5::hash(&input.utxo);

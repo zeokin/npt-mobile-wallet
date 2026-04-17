@@ -30,10 +30,14 @@ use crate::rpc::RpcClient;
 pub struct DiscoveredUtxo {
     /// Display amount.
     pub amount: String,
-    /// Block height where this UTXO was confirmed.
+    /// Block height where this UTXO was confirmed (received).
     pub block_height: u64,
-    /// Whether the UTXO appears spent (bloom filter check).
+    /// Whether the UTXO has been spent on the canonical chain.
+    /// `true` when `spent_in_block` is `Some(_)`, `false` when `None`.
     pub likely_spent: bool,
+    /// Block height where this UTXO was spent, if it has been spent.
+    /// `None` means the UTXO is unspent.
+    pub spent_in_block: Option<u64>,
     /// Key type that found this UTXO.
     pub key_type: String,
     /// Derivation index of the key that found this UTXO.
@@ -106,6 +110,7 @@ fn check_premine(
                 amount,
                 block_height: 0,
                 likely_spent: false,
+                spent_in_block: None,
                 key_type: key_type.clone(),
                 key_index: *key_index,
                 utxo_hex,
@@ -257,6 +262,7 @@ pub async fn scan_for_utxos(
                             amount,
                             block_height: *height,
                             likely_spent: false,
+                            spent_in_block: None,
                             key_type: key_type.clone(),
                             key_index: *key_index,
                             utxo_hex,
@@ -323,14 +329,25 @@ pub async fn scan_for_utxos(
             }
         }
     }
+    // Insert genesis block locally if needed (supporter may not serve block 0 via RPC)
+    if needed_heights.contains(&0) && !block_cache.contains_key(&0) {
+        use neptune_cash::protocol::consensus::block::Block;
+        use neptune_cash::application::config::network::Network;
+        let genesis = Block::genesis(Network::Main);
+        let genesis_hash = genesis.hash();
+        let genesis_kernel: BlockKernel = genesis.kernel.clone();
+        block_cache.insert(0, (genesis_kernel, genesis_hash));
+        debug_log!("[SYNC] Inserted genesis block locally into cache");
+    }
+
     debug_log!("[SYNC] Cached {} wallet blocks", block_cache.len());
 
-    // Step 6: Compute AOCL indices using cached blocks, prepare bloom filter checks
-    struct BloomCheck {
+    // Step 6: Compute AOCL indices using cached blocks, prepare spent-block checks
+    struct SpentCheck {
         utxo_idx: usize,
         abs_json: serde_json::Value,
     }
-    let mut bloom_checks: Vec<BloomCheck> = Vec::new();
+    let mut spent_checks: Vec<SpentCheck> = Vec::new();
 
     for (idx, utxo_data) in discovered.iter_mut().enumerate() {
         let cur_height = utxo_data.block_height;
@@ -401,10 +418,10 @@ pub async fn scan_for_utxos(
                 let aocl_idx = prev_aocl + i as u64;
                 utxo_data.aocl_leaf_index = Some(aocl_idx);
 
-                // Prepare bloom filter check (will run in parallel)
+                // Prepare spent-block check (will run in parallel)
                 let abs_set = AbsoluteIndexSet::compute(item, sr, rp, aocl_idx);
                 if let Ok(abs_json) = serde_json::to_value(&abs_set) {
-                    bloom_checks.push(BloomCheck { utxo_idx: idx, abs_json });
+                    spent_checks.push(SpentCheck { utxo_idx: idx, abs_json });
                 }
                 found = true;
                 break;
@@ -415,21 +432,25 @@ pub async fn scan_for_utxos(
         }
     }
 
-    // Step 7: Run all bloom filter checks in parallel
-    debug_log!("[SYNC] Running {} bloom filter checks in parallel...", bloom_checks.len());
-    let mut bloom_handles = Vec::new();
-    for check in bloom_checks {
+    // Step 7: Run all spent-block checks in parallel
+    // Uses utxoindex_blockHeightsByAbsoluteIndexSets — more accurate than
+    // bloom filter (no false positives) and also tells us WHERE the UTXO
+    // was spent, not just whether it was spent.
+    debug_log!("[SYNC] Running {} spent-block checks in parallel...", spent_checks.len());
+    let mut spent_handles = Vec::new();
+    for check in spent_checks {
         let rpc_clone = rpc.clone();
-        bloom_handles.push(tokio::spawn(async move {
-            (check.utxo_idx, rpc_clone.are_bloom_indices_set(&check.abs_json).await)
+        spent_handles.push(tokio::spawn(async move {
+            (check.utxo_idx, rpc_clone.block_height_where_spent(&check.abs_json).await)
         }));
     }
 
-    for handle in bloom_handles {
+    for handle in spent_handles {
         let (idx, result) = handle.await
-            .map_err(|e| format!("Bloom check task error: {}", e))?;
-        if let Ok(is_spent) = result {
-            discovered[idx].likely_spent = is_spent;
+            .map_err(|e| format!("Spent check task error: {}", e))?;
+        if let Ok(maybe_height) = result {
+            discovered[idx].spent_in_block = maybe_height;
+            discovered[idx].likely_spent = maybe_height.is_some();
         }
     }
 

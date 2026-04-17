@@ -290,18 +290,37 @@ impl RpcClient {
         }
     }
 
-    /// Check if a UTXO's bloom indices are set (likely spent).
-    /// Method: archival_areBloomIndicesSet
-    pub async fn are_bloom_indices_set(&self, absolute_index_set: &Value) -> Result<bool, String> {
+    /// Find the block height where the given absolute index set appears
+    /// as a removal record (i.e. where the UTXO was spent).
+    ///
+    /// Returns `Some(height)` if the UTXO has been spent on the canonical
+    /// chain, `None` if it is unspent.
+    ///
+    /// Note: the server's underlying method deduplicates results into a
+    /// HashSet, so we query one UTXO at a time for an unambiguous mapping.
+    ///
+    /// Method: utxoindex_blockHeightsByAbsoluteIndexSets
+    pub async fn block_height_where_spent(
+        &self,
+        absolute_index_set: &Value,
+    ) -> Result<Option<u64>, String> {
+        // Server expects params as a tuple: [[index_set]]
+        // Request body: {"absolute_index_sets": [index_set]} serialized as tuple
+        let params = json!([[absolute_index_set]]);
+
         let result = self
-            .call("archival_areBloomIndicesSet", json!([absolute_index_set]))
+            .call("utxoindex_blockHeightsByAbsoluteIndexSets", params)
             .await?;
 
-        // Response: {"are_set": true} or {"areSet": true}
-        result
-            .get("are_set")
-            .or_else(|| result.get("areSet"))
-            .and_then(|v| v.as_bool())
-            .ok_or_else(|| format!("Invalid areBloomIndicesSet response: {}", result))
+        // Response: {"blockHeights": [h1, h2, ...]} or {"block_heights": [...]}
+        // Empty array means unspent; non-empty means spent.
+        let heights_array = result
+            .get("block_heights")
+            .or_else(|| result.get("blockHeights"))
+            .and_then(|v| v.as_array())
+            .ok_or_else(|| format!("Invalid blockHeightsByAbsoluteIndexSets response: {}", result))?;
+
+        // Take the first (and should be only) height; return None if empty.
+        Ok(heights_array.first().and_then(|v| v.as_u64()))
     }
 }
