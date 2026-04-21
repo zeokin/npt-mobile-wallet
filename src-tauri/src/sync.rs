@@ -12,16 +12,19 @@
 //! Performance: kernel fetches, wallet block fetches, and bloom filter checks
 //! are all parallelized. Wallet blocks are cached to avoid duplicate fetches.
 
+use std::collections::HashMap;
+use std::collections::HashSet;
+
 use neptune_cash::api::export::KeyType;
 use neptune_cash::application::config::network::Network;
+use neptune_cash::prelude::triton_vm::prelude::BFieldElement;
 use neptune_cash::protocol::consensus::block::Block;
 use neptune_cash::state::wallet::address::announcement_flag::AnnouncementFlag;
 use neptune_cash::state::wallet::address::ReceivingAddress;
 use neptune_cash::state::wallet::address::SpendingKey;
 use neptune_cash::state::wallet::wallet_entropy::WalletEntropy;
-use serde::{Deserialize, Serialize};
-use neptune_cash::prelude::triton_vm::prelude::BFieldElement;
-use std::collections::{HashMap, HashSet};
+use serde::Deserialize;
+use serde::Serialize;
 
 use crate::rpc::RpcClient;
 
@@ -70,10 +73,7 @@ pub(crate) struct SyncResult {
 /// Premine UTXOs have no announcements, so the flag-based scan will never
 /// find them. Instead, we compare lock_script_hash of each premine UTXO
 /// against the wallet's receiving addresses.
-fn check_premine(
-    keys: &[(SpendingKey, u64, String)],
-    network: Network,
-) -> Vec<DiscoveredUtxo> {
+fn check_premine(keys: &[(SpendingKey, u64, String)], network: Network) -> Vec<DiscoveredUtxo> {
     let premine_utxos = Block::premine_utxos();
     let sender_randomness = Block::premine_sender_randomness(network);
 
@@ -97,7 +97,11 @@ fn check_premine(
                 continue;
             }
 
-            debug_log!("[PREMINE] Found premine UTXO for {} key index {}", key_type, key_index);
+            debug_log!(
+                "[PREMINE] Found premine UTXO for {} key index {}",
+                key_type,
+                key_index
+            );
 
             let amount = format_utxo_amount(utxo);
             let receiver_preimage = key.privacy_preimage();
@@ -180,7 +184,10 @@ pub(crate) async fn scan_for_utxos(
     }
 
     // Step 3: Fetch ALL block kernels in parallel
-    debug_log!("[SYNC] Fetching {} block kernels in parallel...", block_heights.len());
+    debug_log!(
+        "[SYNC] Fetching {} block kernels in parallel...",
+        block_heights.len()
+    );
     let mut kernel_handles = Vec::new();
     for &height in &block_heights {
         let rpc_clone = rpc.clone();
@@ -192,7 +199,8 @@ pub(crate) async fn scan_for_utxos(
     // Collect kernel results into ordered map
     let mut kernels: Vec<(u64, serde_json::Value)> = Vec::new();
     for handle in kernel_handles {
-        let (height, result) = handle.await
+        let (height, result) = handle
+            .await
             .map_err(|e| format!("Kernel fetch task error: {}", e))?;
         match result? {
             Some(kernel_json) => kernels.push((height, kernel_json)),
@@ -206,25 +214,42 @@ pub(crate) async fn scan_for_utxos(
     let mut discovered: Vec<DiscoveredUtxo> = premine_utxos;
 
     for (height, kernel_json) in &kernels {
-        debug_log!("[DEBUG] kernel JSON keys: {:?}",
-            kernel_json.as_object().map(|o| o.keys().collect::<Vec<_>>()));
+        debug_log!(
+            "[DEBUG] kernel JSON keys: {:?}",
+            kernel_json
+                .as_object()
+                .map(|o| o.keys().collect::<Vec<_>>())
+        );
         let announcements = kernel_json
             .get("announcements")
             .and_then(|a| a.as_array())
             .cloned()
             .unwrap_or_default();
-        debug_log!("[DEBUG] Found {} announcements in block {}", announcements.len(), height);
+        debug_log!(
+            "[DEBUG] Found {} announcements in block {}",
+            announcements.len(),
+            height
+        );
 
         for announcement_val in &announcements {
             let msg = match parse_announcement_message(announcement_val) {
                 Some(m) => {
-                    debug_log!("[DEBUG] Parsed announcement: {} BFieldElements, first two: {:?}",
-                        m.len(), m.iter().take(2).map(|b| b.value()).collect::<Vec<_>>());
+                    debug_log!(
+                        "[DEBUG] Parsed announcement: {} BFieldElements, first two: {:?}",
+                        m.len(),
+                        m.iter().take(2).map(|b| b.value()).collect::<Vec<_>>()
+                    );
                     m
                 }
                 None => {
-                    debug_log!("[DEBUG] Failed to parse announcement: {}",
-                        serde_json::to_string(announcement_val).unwrap_or_default().chars().take(200).collect::<String>());
+                    debug_log!(
+                        "[DEBUG] Failed to parse announcement: {}",
+                        serde_json::to_string(announcement_val)
+                            .unwrap_or_default()
+                            .chars()
+                            .take(200)
+                            .collect::<String>()
+                    );
                     continue;
                 }
             };
@@ -248,15 +273,11 @@ pub(crate) async fn scan_for_utxos(
                         let amount = format_utxo_amount(&utxo);
                         let receiver_preimage = key.privacy_preimage();
 
-                        let utxo_hex = hex::encode(
-                            bincode::serialize(&utxo).unwrap_or_default(),
-                        );
-                        let sr_hex = hex::encode(
-                            bincode::serialize(&sender_randomness).unwrap_or_default(),
-                        );
-                        let rp_hex = hex::encode(
-                            bincode::serialize(&receiver_preimage).unwrap_or_default(),
-                        );
+                        let utxo_hex = hex::encode(bincode::serialize(&utxo).unwrap_or_default());
+                        let sr_hex =
+                            hex::encode(bincode::serialize(&sender_randomness).unwrap_or_default());
+                        let rp_hex =
+                            hex::encode(bincode::serialize(&receiver_preimage).unwrap_or_default());
 
                         discovered.push(DiscoveredUtxo {
                             amount,
@@ -277,7 +298,10 @@ pub(crate) async fn scan_for_utxos(
         }
     }
 
-    debug_log!("[SYNC] Discovered {} UTXOs, computing AOCL indices...", discovered.len());
+    debug_log!(
+        "[SYNC] Discovered {} UTXOs, computing AOCL indices...",
+        discovered.len()
+    );
 
     if discovered.is_empty() {
         return Ok(SyncResult {
@@ -291,10 +315,10 @@ pub(crate) async fn scan_for_utxos(
     // Step 5: Fetch wallet blocks (cached + parallel)
     // Collect all unique block heights we need
     use neptune_cash::application::json_rpc::core::model::wallet::block::RpcWalletBlock;
-    use neptune_cash::protocol::consensus::block::block_kernel::BlockKernel;
-    use neptune_cash::prelude::twenty_first::util_types::mmr::mmr_trait::Mmr;
-    use neptune_cash::util_types::mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
     use neptune_cash::prelude::triton_vm::prelude::Digest;
+    use neptune_cash::prelude::twenty_first::util_types::mmr::mmr_trait::Mmr;
+    use neptune_cash::protocol::consensus::block::block_kernel::BlockKernel;
+    use neptune_cash::util_types::mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
 
     let mut needed_heights: HashSet<u64> = HashSet::new();
     for utxo in &discovered {
@@ -304,7 +328,10 @@ pub(crate) async fn scan_for_utxos(
         }
     }
 
-    debug_log!("[SYNC] Fetching {} wallet blocks in parallel (deduplicated)...", needed_heights.len());
+    debug_log!(
+        "[SYNC] Fetching {} wallet blocks in parallel (deduplicated)...",
+        needed_heights.len()
+    );
     let mut block_handles = Vec::new();
     for &h in &needed_heights {
         let rpc_clone = rpc.clone();
@@ -316,7 +343,8 @@ pub(crate) async fn scan_for_utxos(
     // Parse into cache: height → (BlockKernel, block_hash)
     let mut block_cache: HashMap<u64, (BlockKernel, Digest)> = HashMap::new();
     for handle in block_handles {
-        let (h, result) = handle.await
+        let (h, result) = handle
+            .await
             .map_err(|e| format!("Block fetch task error: {}", e))?;
         if let Ok(json) = result {
             let blocks_json = json.get("blocks").cloned().unwrap_or(json);
@@ -331,8 +359,8 @@ pub(crate) async fn scan_for_utxos(
     }
     // Insert genesis block locally if needed (supporter may not serve block 0 via RPC)
     if needed_heights.contains(&0) && !block_cache.contains_key(&0) {
-        use neptune_cash::protocol::consensus::block::Block;
         use neptune_cash::application::config::network::Network;
+        use neptune_cash::protocol::consensus::block::Block;
         let genesis = Block::genesis(Network::Main);
         let genesis_hash = genesis.hash();
         let genesis_kernel: BlockKernel = genesis.kernel.clone();
@@ -369,7 +397,11 @@ pub(crate) async fn scan_for_utxos(
                 None => continue,
             };
             match prev_kernel.guesser_fee_addition_records(*prev_hash) {
-                Ok(gf) => prev_kernel.body.mutator_set_accumulator_after(gf).aocl.num_leafs(),
+                Ok(gf) => prev_kernel
+                    .body
+                    .mutator_set_accumulator_after(gf)
+                    .aocl
+                    .num_leafs(),
                 Err(_) => continue,
             }
         };
@@ -421,14 +453,21 @@ pub(crate) async fn scan_for_utxos(
                 // Prepare spent-block check (will run in parallel)
                 let abs_set = AbsoluteIndexSet::compute(item, sr, rp, aocl_idx);
                 if let Ok(abs_json) = serde_json::to_value(&abs_set) {
-                    spent_checks.push(SpentCheck { utxo_idx: idx, abs_json });
+                    spent_checks.push(SpentCheck {
+                        utxo_idx: idx,
+                        abs_json,
+                    });
                 }
                 found = true;
                 break;
             }
         }
         if !found {
-            debug_log!("[SYNC] Warning: UTXO at index {} not found in block {} additions", idx, cur_height);
+            debug_log!(
+                "[SYNC] Warning: UTXO at index {} not found in block {} additions",
+                idx,
+                cur_height
+            );
         }
     }
 
@@ -436,17 +475,24 @@ pub(crate) async fn scan_for_utxos(
     // Uses utxoindex_blockHeightsByAbsoluteIndexSets — more accurate than
     // bloom filter (no false positives) and also tells us WHERE the UTXO
     // was spent, not just whether it was spent.
-    debug_log!("[SYNC] Running {} spent-block checks in parallel...", spent_checks.len());
+    debug_log!(
+        "[SYNC] Running {} spent-block checks in parallel...",
+        spent_checks.len()
+    );
     let mut spent_handles = Vec::new();
     for check in spent_checks {
         let rpc_clone = rpc.clone();
         spent_handles.push(tokio::spawn(async move {
-            (check.utxo_idx, rpc_clone.block_height_where_spent(&check.abs_json).await)
+            (
+                check.utxo_idx,
+                rpc_clone.block_height_where_spent(&check.abs_json).await,
+            )
         }));
     }
 
     for handle in spent_handles {
-        let (idx, result) = handle.await
+        let (idx, result) = handle
+            .await
             .map_err(|e| format!("Spent check task error: {}", e))?;
         if let Ok(maybe_height) = result {
             discovered[idx].spent_in_block = maybe_height;
@@ -463,7 +509,11 @@ pub(crate) async fn scan_for_utxos(
         format!("{} UTXOs ({})", unspent.len(), amounts.join(" + "))
     };
 
-    debug_log!("[SYNC] Done: {} UTXOs ({} unspent)", discovered.len(), unspent.len());
+    debug_log!(
+        "[SYNC] Done: {} UTXOs ({} unspent)",
+        discovered.len(),
+        unspent.len()
+    );
 
     Ok(SyncResult {
         balance,
@@ -478,9 +528,7 @@ pub(crate) async fn scan_for_utxos(
 /// - Hex string: "0x000000000000004f7a82100676eaada1..." (each 16 hex chars = 1 BFieldElement)
 /// - Array of numbers: [79, 12345, ...]
 /// - Nested: {"message": [...]} or {"0": "0x..."}
-fn parse_announcement_message(
-    val: &serde_json::Value,
-) -> Option<Vec<BFieldElement>> {
+fn parse_announcement_message(val: &serde_json::Value) -> Option<Vec<BFieldElement>> {
     // Try hex string: "0x..." where each BFieldElement is 16 hex chars (8 bytes, little-endian)
     if let Some(hex_str) = val.as_str() {
         let hex = hex_str.strip_prefix("0x").unwrap_or(hex_str);

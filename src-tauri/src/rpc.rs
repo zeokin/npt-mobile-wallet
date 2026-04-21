@@ -1,7 +1,10 @@
-use reqwest::Client;
-use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
 use std::time::Duration;
+
+use reqwest::Client;
+use serde::Deserialize;
+use serde::Serialize;
+use serde_json::json;
+use serde_json::Value;
 
 #[derive(Clone)]
 pub(crate) struct RpcClient {
@@ -72,11 +75,18 @@ impl RpcClient {
             .map_err(|e| format!("Invalid response: {}", e))?;
 
         if let Some(err) = rpc_resp.error {
-            debug_log!("[DEBUG] RPC error for method '{}': code={}, message='{}'", method, err.code, err.message);
+            debug_log!(
+                "[DEBUG] RPC error for method '{}': code={}, message='{}'",
+                method,
+                err.code,
+                err.message
+            );
             return Err(format!("RPC error {}: {}", err.code, err.message));
         }
 
-        rpc_resp.result.ok_or_else(|| "No result in response".to_string())
+        rpc_resp
+            .result
+            .ok_or_else(|| "No result in response".to_string())
     }
 
     pub(crate) async fn test_connection(&self) -> Result<(String, u64), String> {
@@ -114,12 +124,23 @@ impl RpcClient {
     }
 
     pub(crate) async fn generate_address(&self, key_type: &str) -> Result<String, String> {
-        let result = self.call("personal_generateAddress", json!([key_type])).await?;
-        result.as_str().map(|s| s.to_string()).ok_or("Invalid address response".to_string())
+        let result = self
+            .call("personal_generateAddress", json!([key_type]))
+            .await?;
+        result
+            .as_str()
+            .map(|s| s.to_string())
+            .ok_or("Invalid address response".to_string())
     }
 
-    pub(crate) async fn send(&self, address: &str, amount: &str, fee: &str) -> Result<Value, String> {
-        self.call("personal_send", json!([address, amount, fee])).await
+    pub(crate) async fn send(
+        &self,
+        address: &str,
+        amount: &str,
+        fee: &str,
+    ) -> Result<Value, String> {
+        self.call("personal_send", json!([address, amount, fee]))
+            .await
     }
 
     pub(crate) async fn incoming_history(&self) -> Result<Value, String> {
@@ -139,7 +160,9 @@ impl RpcClient {
     }
 
     pub(crate) async fn validate_address(&self, address: &str) -> Result<bool, String> {
-        let result = self.call("wallet_validateAddress", json!([address])).await?;
+        let result = self
+            .call("wallet_validateAddress", json!([address]))
+            .await?;
         // Response formats:
         // - bool: true/false
         // - object with addressType: {"addressType":"generation",...} means valid
@@ -171,7 +194,11 @@ impl RpcClient {
 
     /// Get wallet-optimized blocks by height range.
     /// Method: wallet_getBlocks — returns RpcWalletBlock (lighter than full Block)
-    pub(crate) async fn get_wallet_blocks(&self, from_height: u64, to_height: u64) -> Result<Value, String> {
+    pub(crate) async fn get_wallet_blocks(
+        &self,
+        from_height: u64,
+        to_height: u64,
+    ) -> Result<Value, String> {
         use neptune_cash::application::json_rpc::core::model::message::GetBlocksRequest;
         use neptune_cash::protocol::consensus::block::block_height::BlockHeight;
 
@@ -179,21 +206,19 @@ impl RpcClient {
             from_height: BlockHeight::from(from_height),
             to_height: BlockHeight::from(to_height),
         };
-        let params = serde_json::to_value(&request)
-            .map_err(|e| format!("Serialize request: {}", e))?;
+        let params =
+            serde_json::to_value(&request).map_err(|e| format!("Serialize request: {}", e))?;
         self.call("wallet_getBlocks", params).await
     }
 
     /// Restore membership proofs for spending UTXOs.
     /// Method: wallet_restoreMembershipProof
     /// Params are pre-serialized via RestoreMembershipProofRequest (Serialize_tuple)
-    pub(crate) async fn restore_membership_proof(
-        &self,
-        params: &Value,
-    ) -> Result<Value, String> {
+    pub(crate) async fn restore_membership_proof(&self, params: &Value) -> Result<Value, String> {
         // params is already serialized from RestoreMembershipProofRequest
         // which is Serialize_tuple, so it's already an array like [[...]]
-        self.call("wallet_restoreMembershipProof", params.clone()).await
+        self.call("wallet_restoreMembershipProof", params.clone())
+            .await
     }
 
     /// Submit a locally-built transaction.
@@ -223,11 +248,13 @@ impl RpcClient {
         let request = BlockHeightsByFlagsRequest {
             announcement_flags: flags.to_vec(),
         };
-        let params = serde_json::to_value(&request)
-            .map_err(|e| format!("Serialize request: {}", e))?;
+        let params =
+            serde_json::to_value(&request).map_err(|e| format!("Serialize request: {}", e))?;
 
-        debug_log!("[DEBUG] blockHeightsByFlags params: {}",
-            serde_json::to_string(&params).unwrap_or_default());
+        debug_log!(
+            "[DEBUG] blockHeightsByFlags params: {}",
+            serde_json::to_string(&params).unwrap_or_default()
+        );
 
         let result = match self.call("utxoindex_blockHeightsByFlags", params).await {
             Ok(r) => r,
@@ -236,10 +263,9 @@ impl RpcClient {
                 // If utxoindex is not available, return empty — the UTXO index
                 // namespace might not be enabled on this supporter
                 if e.contains("-32601") || e.contains("Method not found") {
-                    return Err(
-                        "Supporter does not have UTXO index enabled. \
-                         Ask the node operator to run with --utxo-index flag.".to_string()
-                    );
+                    return Err("Supporter does not have UTXO index enabled. \
+                         Ask the node operator to run with --utxo-index flag."
+                        .to_string());
                 }
                 return Err(e);
             }
@@ -265,17 +291,19 @@ impl RpcClient {
         height: u64,
     ) -> Result<Option<Value>, String> {
         use neptune_cash::application::json_rpc::core::model::message::GetBlockTransactionKernelRequest;
-        use neptune_cash::protocol::consensus::block::block_selector::BlockSelector;
         use neptune_cash::protocol::consensus::block::block_height::BlockHeight;
+        use neptune_cash::protocol::consensus::block::block_selector::BlockSelector;
 
         let request = GetBlockTransactionKernelRequest {
             selector: BlockSelector::Height(BlockHeight::from(height)),
         };
-        let params = serde_json::to_value(&request)
-            .map_err(|e| format!("Serialize request: {}", e))?;
+        let params =
+            serde_json::to_value(&request).map_err(|e| format!("Serialize request: {}", e))?;
 
-        debug_log!("[DEBUG] getBlockTransactionKernel params: {}",
-            serde_json::to_string(&params).unwrap_or_default());
+        debug_log!(
+            "[DEBUG] getBlockTransactionKernel params: {}",
+            serde_json::to_string(&params).unwrap_or_default()
+        );
 
         let result = self
             .call("archival_getBlockTransactionKernel", params)
@@ -318,7 +346,12 @@ impl RpcClient {
             .get("block_heights")
             .or_else(|| result.get("blockHeights"))
             .and_then(|v| v.as_array())
-            .ok_or_else(|| format!("Invalid blockHeightsByAbsoluteIndexSets response: {}", result))?;
+            .ok_or_else(|| {
+                format!(
+                    "Invalid blockHeightsByAbsoluteIndexSets response: {}",
+                    result
+                )
+            })?;
 
         // Take the first (and should be only) height; return None if empty.
         Ok(heights_array.first().and_then(|v| v.as_u64()))

@@ -1,10 +1,15 @@
-use aes_gcm::aead::Aead;
-use aes_gcm::{Aes256Gcm, KeyInit, Nonce};
-use argon2::Argon2;
-use bip39::{Language, Mnemonic};
-use rand::RngCore;
-use sha2::{Digest, Sha256};
 use std::path::PathBuf;
+
+use aes_gcm::aead::Aead;
+use aes_gcm::Aes256Gcm;
+use aes_gcm::KeyInit;
+use aes_gcm::Nonce;
+use argon2::Argon2;
+use bip39::Language;
+use bip39::Mnemonic;
+use rand::RngCore;
+use sha2::Digest;
+use sha2::Sha256;
 use tauri::Manager;
 use zeroize::Zeroize;
 
@@ -40,28 +45,27 @@ pub fn generate_mnemonic() -> Result<Mnemonic, String> {
 
 /// Validate a mnemonic string (must be 18 words).
 pub fn validate_mnemonic(words: &str) -> Result<Mnemonic, String> {
-    let m = Mnemonic::parse_in(Language::English, words)
-        .map_err(|e| {
-            // bip39 crate reports word positions as 0-indexed.
-            // Convert to 1-indexed for the UI ("word 16" -> "word 17").
-            let msg = e.to_string();
-            let fixed = match msg.find("(word ") {
-                Some(start) => {
-                    let after = &msg[start + 6..];
-                    if let Some(end) = after.find(')') {
-                        if let Ok(n) = after[..end].parse::<usize>() {
-                            format!("{}{}{}", &msg[..start + 6], n + 1, &msg[start + 6 + end..])
-                        } else {
-                            msg
-                        }
+    let m = Mnemonic::parse_in(Language::English, words).map_err(|e| {
+        // bip39 crate reports word positions as 0-indexed.
+        // Convert to 1-indexed for the UI ("word 16" -> "word 17").
+        let msg = e.to_string();
+        let fixed = match msg.find("(word ") {
+            Some(start) => {
+                let after = &msg[start + 6..];
+                if let Some(end) = after.find(')') {
+                    if let Ok(n) = after[..end].parse::<usize>() {
+                        format!("{}{}{}", &msg[..start + 6], n + 1, &msg[start + 6 + end..])
                     } else {
                         msg
                     }
+                } else {
+                    msg
                 }
-                None => msg,
-            };
-            format!("Invalid mnemonic: {}", fixed)
-        })?;
+            }
+            None => msg,
+        };
+        format!("Invalid mnemonic: {}", fixed)
+    })?;
     let word_count = words.split_whitespace().count();
     if word_count != 18 {
         return Err(format!("Expected 18 words, got {}", word_count));
@@ -108,8 +112,8 @@ pub fn encrypt_seed(entropy: &[u8], pin: &str) -> Result<Vec<u8>, String> {
     rand::thread_rng().fill_bytes(&mut salt);
 
     let mut key = derive_key_argon2id(pin, &salt)?;
-    let cipher = Aes256Gcm::new_from_slice(&key)
-        .map_err(|e| format!("Cipher init failed: {}", e))?;
+    let cipher =
+        Aes256Gcm::new_from_slice(&key).map_err(|e| format!("Cipher init failed: {}", e))?;
     key.zeroize();
 
     let mut nonce_bytes = [0u8; 12];
@@ -156,8 +160,8 @@ fn decrypt_seed_v2(encrypted: &[u8], pin: &str) -> Result<Vec<u8>, String> {
     let ciphertext = &encrypted[HEADER_LEN + 44..];
 
     let mut key = derive_key_argon2id(pin, salt)?;
-    let cipher = Aes256Gcm::new_from_slice(&key)
-        .map_err(|e| format!("Cipher init failed: {}", e))?;
+    let cipher =
+        Aes256Gcm::new_from_slice(&key).map_err(|e| format!("Cipher init failed: {}", e))?;
     key.zeroize();
 
     let nonce = Nonce::from_slice(nonce_bytes);
@@ -176,8 +180,8 @@ fn decrypt_seed_v1_legacy(encrypted: &[u8], pin: &str) -> Result<Vec<u8>, String
     let ciphertext = &encrypted[44..];
 
     let mut key = derive_key_sha256_legacy(pin, salt);
-    let cipher = Aes256Gcm::new_from_slice(&key)
-        .map_err(|e| format!("Cipher init failed: {}", e))?;
+    let cipher =
+        Aes256Gcm::new_from_slice(&key).map_err(|e| format!("Cipher init failed: {}", e))?;
     key.zeroize();
 
     let nonce = Nonce::from_slice(nonce_bytes);

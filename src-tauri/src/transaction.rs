@@ -9,13 +9,18 @@
 //! This prevents mobile devices from attempting proofs that would
 //! take too long or crash with OOM.
 
-use anyhow::{anyhow, Result};
+use anyhow::anyhow;
+use anyhow::Result;
 use itertools::Itertools;
 use neptune_cash::api::export::Tip5;
+use neptune_cash::api::export::TransactionDetails;
 use neptune_cash::api::export::TransactionProof;
+use neptune_cash::prelude::tasm_lib;
 use neptune_cash::prelude::triton_vm::proof::Proof;
 use neptune_cash::prelude::triton_vm::stark::Stark;
-use neptune_cash::prelude::triton_vm::vm::{NonDeterminism, PublicInput, VM};
+use neptune_cash::prelude::triton_vm::vm::NonDeterminism;
+use neptune_cash::prelude::triton_vm::vm::PublicInput;
+use neptune_cash::prelude::triton_vm::vm::VM;
 use neptune_cash::protocol::consensus::transaction::primitive_witness::PrimitiveWitness;
 use neptune_cash::protocol::consensus::transaction::transaction_kernel::TransactionKernelField;
 use neptune_cash::protocol::consensus::transaction::validity::collect_lock_scripts::CollectLockScriptsWitness;
@@ -26,25 +31,14 @@ use neptune_cash::protocol::consensus::transaction::validity::removal_records_in
 use neptune_cash::protocol::consensus::transaction::Transaction;
 use neptune_cash::protocol::proof_abstractions::mast_hash::MastHash;
 use neptune_cash::protocol::proof_abstractions::SecretWitness;
-use serde::{Deserialize, Serialize};
 use tasm_lib::triton_vm::prelude::Program;
 use tasm_lib::triton_vm::proof::Claim;
-
-use neptune_cash::api::export::TransactionDetails;
-use neptune_cash::prelude::tasm_lib;
 
 /// Maximum log2 padded height for proof generation.
 /// Must complete within ~9 minutes (before next block invalidates proofs).
 /// Testing results: 2^23 takes ~3 min on desktop.
 /// 2^24 would take ~6-8 min. 2^25 would risk exceeding block time.
 const MAX_LOG2_PADDED_HEIGHT: u8 = 24;
-
-/// Result of a send operation.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub(crate) struct SendResult {
-    pub(crate) txid: String,
-    pub(crate) status: String,
-}
 
 /// Build a Transaction from TransactionDetails.
 ///
@@ -75,8 +69,7 @@ fn produce_proof_collection(
     primitive_witness: &PrimitiveWitness,
     max_log2_padded_height: Option<u8>,
 ) -> Result<ProofCollection> {
-    let removal_records_integrity_witness =
-        RemovalRecordsIntegrityWitness::from(primitive_witness);
+    let removal_records_integrity_witness = RemovalRecordsIntegrityWitness::from(primitive_witness);
     let collect_lock_scripts_witness = CollectLockScriptsWitness::from(primitive_witness);
     let kernel_to_outputs_witness = KernelToOutputsWitness::from(primitive_witness);
     let collect_type_scripts_witness = CollectTypeScriptsWitness::from(primitive_witness);
@@ -125,7 +118,11 @@ fn produce_proof_collection(
 
     // Prove lock scripts (1 per input UTXO)
     let mut lock_scripts_halt = vec![];
-    for (i, lsaw) in primitive_witness.lock_scripts_and_witnesses.iter().enumerate() {
+    for (i, lsaw) in primitive_witness
+        .lock_scripts_and_witnesses
+        .iter()
+        .enumerate()
+    {
         let claim = Claim::new(lsaw.program.hash())
             .with_input(txk_mast_hash_as_input.clone().individual_tokens);
         let proof = prove_with_limit(
@@ -141,7 +138,11 @@ fn produce_proof_collection(
 
     // Prove type scripts (1 per type)
     let mut type_scripts_halt = vec![];
-    for (i, tsaw) in primitive_witness.type_scripts_and_witnesses.iter().enumerate() {
+    for (i, tsaw) in primitive_witness
+        .type_scripts_and_witnesses
+        .iter()
+        .enumerate()
+    {
         let input: Vec<_> = [txk_mast_hash, salted_inputs_hash, salted_outputs_hash]
             .into_iter()
             .flat_map(|d| d.reversed().values())
@@ -219,8 +220,12 @@ fn prove_with_limit(
 
     // Step 2: Check complexity (instant)
     let log2_padded_height = aet.padded_height().ilog2() as u8;
-    debug_log!("[PROOF] {} padded_height: 2^{} = {} rows",
-        proof_name, log2_padded_height, aet.padded_height());
+    debug_log!(
+        "[PROOF] {} padded_height: 2^{} = {} rows",
+        proof_name,
+        log2_padded_height,
+        aet.padded_height()
+    );
     if let Some(max) = max_log2_padded_height {
         if log2_padded_height > max {
             return Err(anyhow!(

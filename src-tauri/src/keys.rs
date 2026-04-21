@@ -103,7 +103,10 @@ mod tests {
         let entropy = wallet_entropy_from_phrase(&words).unwrap();
         let addr0 = derive_receiving_address(&entropy, 0, "generation", "main").unwrap();
         let addr1 = derive_receiving_address(&entropy, 1, "generation", "main").unwrap();
-        assert_ne!(addr0, addr1, "Different indices must produce different addresses");
+        assert_ne!(
+            addr0, addr1,
+            "Different indices must produce different addresses"
+        );
     }
 
     #[test]
@@ -118,11 +121,17 @@ mod tests {
         let flag = AnnouncementFlag::from(&addr);
 
         let flag_json = serde_json::to_value(&flag).unwrap();
-        println!("Single flag JSON: {}", serde_json::to_string_pretty(&flag_json).unwrap());
+        println!(
+            "Single flag JSON: {}",
+            serde_json::to_string_pretty(&flag_json).unwrap()
+        );
 
         let flags = vec![flag];
         let flags_json = serde_json::to_value(&flags).unwrap();
-        println!("Vec<flag> JSON: {}", serde_json::to_string_pretty(&flags_json).unwrap());
+        println!(
+            "Vec<flag> JSON: {}",
+            serde_json::to_string_pretty(&flags_json).unwrap()
+        );
 
         // This is what the RPC params should look like (tuple struct wrapping)
         let params = serde_json::json!([flags_json]);

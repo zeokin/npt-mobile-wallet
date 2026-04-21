@@ -1,0 +1,7 @@
+{
+  "[rust]": {
+    "editor.rulers": [80, 100],
+    "files.trimTrailingWhitespace": true,
+    "editor.formatOnSave": true
+  }
+}
