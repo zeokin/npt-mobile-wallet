@@ -25,3 +25,8 @@ dist-ssr
 *.jks
 *.keystore
 keystore.properties
+
+leveldb-sys/Cargo.lock
+leveldb-sys/target/*
+systemstat-stub/target/*
+systemstat-stub/Cargo.lock
