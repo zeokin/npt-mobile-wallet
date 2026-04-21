@@ -18,7 +18,7 @@ use neptune_cash::state::wallet::wallet_entropy::WalletEntropy;
 ///
 /// This is the root of all key derivation. The WalletEntropy can then
 /// produce spending keys, receiving addresses, etc. at any index.
-pub fn wallet_entropy_from_phrase(words: &[String]) -> Result<WalletEntropy, String> {
+pub(crate) fn wallet_entropy_from_phrase(words: &[String]) -> Result<WalletEntropy, String> {
     WalletEntropy::from_phrase(words).map_err(|e| format!("Key derivation failed: {}", e))
 }
 
@@ -29,7 +29,7 @@ pub fn wallet_entropy_from_phrase(words: &[String]) -> Result<WalletEntropy, Str
 /// - `network`: "main", "testnet", or "regtest"
 ///
 /// Returns the bech32m-encoded address string.
-pub fn derive_receiving_address(
+pub(crate) fn derive_receiving_address(
     entropy: &WalletEntropy,
     index: u64,
     key_type: &str,

@@ -41,16 +41,16 @@ const MAX_LOG2_PADDED_HEIGHT: u8 = 24;
 
 /// Result of a send operation.
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct SendResult {
-    pub txid: String,
-    pub status: String,
+pub(crate) struct SendResult {
+    pub(crate) txid: String,
+    pub(crate) status: String,
 }
 
 /// Build a Transaction from TransactionDetails.
 ///
 /// Uses two-step approach: trace first (fast), then prove (slow).
 /// Fails fast if any proof exceeds the mobile complexity limit.
-pub async fn build_transaction(
+pub(crate) async fn build_transaction(
     transaction_details: &TransactionDetails,
 ) -> Result<Transaction> {
     let primitive_witness = PrimitiveWitness::from_transaction_details(transaction_details);

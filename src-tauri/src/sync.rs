@@ -27,42 +27,42 @@ use crate::rpc::RpcClient;
 
 /// A discovered UTXO with all data needed for display and spending.
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct DiscoveredUtxo {
+pub(crate) struct DiscoveredUtxo {
     /// Display amount.
-    pub amount: String,
+    pub(crate) amount: String,
     /// Block height where this UTXO was confirmed (received).
-    pub block_height: u64,
+    pub(crate) block_height: u64,
     /// Whether the UTXO has been spent on the canonical chain.
     /// `true` when `spent_in_block` is `Some(_)`, `false` when `None`.
-    pub likely_spent: bool,
+    pub(crate) likely_spent: bool,
     /// Block height where this UTXO was spent, if it has been spent.
     /// `None` means the UTXO is unspent.
-    pub spent_in_block: Option<u64>,
+    pub(crate) spent_in_block: Option<u64>,
     /// Key type that found this UTXO.
-    pub key_type: String,
+    pub(crate) key_type: String,
     /// Derivation index of the key that found this UTXO.
-    pub key_index: u64,
+    pub(crate) key_index: u64,
     /// Hex-encoded bincode of the Utxo (for spending).
-    pub utxo_hex: String,
+    pub(crate) utxo_hex: String,
     /// Hex-encoded bincode of the sender_randomness Digest.
-    pub sender_randomness_hex: String,
+    pub(crate) sender_randomness_hex: String,
     /// Hex-encoded bincode of the receiver_preimage Digest.
-    pub receiver_preimage_hex: String,
+    pub(crate) receiver_preimage_hex: String,
     /// AOCL leaf index — stored at discovery time for correct spending.
-    pub aocl_leaf_index: Option<u64>,
+    pub(crate) aocl_leaf_index: Option<u64>,
 }
 
 /// Result of a wallet sync operation.
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct SyncResult {
+pub(crate) struct SyncResult {
     /// Total balance description.
-    pub balance: String,
+    pub(crate) balance: String,
     /// Number of UTXOs found.
-    pub utxo_count: usize,
+    pub(crate) utxo_count: usize,
     /// Number of blocks scanned.
-    pub blocks_scanned: usize,
+    pub(crate) blocks_scanned: usize,
     /// Discovered UTXOs.
-    pub utxos: Vec<DiscoveredUtxo>,
+    pub(crate) utxos: Vec<DiscoveredUtxo>,
 }
 
 /// Check if any genesis block (premine) UTXOs belong to this wallet.
@@ -129,7 +129,7 @@ fn check_premine(
 }
 
 /// Scan the blockchain for UTXOs belonging to this wallet.
-pub async fn scan_for_utxos(
+pub(crate) async fn scan_for_utxos(
     rpc: &RpcClient,
     entropy: &WalletEntropy,
     num_generation_keys: u64,
