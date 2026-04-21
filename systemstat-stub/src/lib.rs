@@ -44,7 +44,8 @@ pub struct DelayedMeasurement<T> {
 }
 
 impl<T> DelayedMeasurement<T> {
-    pub fn done(&self) -> Result<T, std::io::Error> {
+    #[expect(unused)]
+    pub(crate) fn done(&self) -> Result<T, std::io::Error> {
         Err(std::io::Error::new(
             std::io::ErrorKind::Unsupported,
             "not supported on this platform",
@@ -52,23 +53,25 @@ impl<T> DelayedMeasurement<T> {
     }
 }
 
+#[expect(unused)]
 #[derive(Debug, Clone)]
 pub struct CPULoad {
-    pub user: f32,
-    pub nice: f32,
-    pub system: f32,
-    pub interrupt: f32,
-    pub idle: f32,
+    pub(crate) user: f32,
+    pub(crate) nice: f32,
+    pub(crate) system: f32,
+    pub(crate) interrupt: f32,
+    pub(crate) idle: f32,
 }
 
+#[expect(unused)]
 #[derive(Debug, Clone)]
 pub struct Memory {
-    pub total: ByteSize,
-    pub free: ByteSize,
+    pub(crate) total: ByteSize,
+    pub(crate) free: ByteSize,
 }
 
 #[derive(Debug, Clone, Copy)]
-pub struct ByteSize(pub u64);
+pub(crate) struct ByteSize(pub(crate) u64);
 
 impl std::fmt::Display for ByteSize {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

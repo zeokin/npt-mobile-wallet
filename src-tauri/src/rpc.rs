@@ -1,10 +1,13 @@
-use reqwest::Client;
-use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
 use std::time::Duration;
 
+use reqwest::Client;
+use serde::Deserialize;
+use serde::Serialize;
+use serde_json::json;
+use serde_json::Value;
+
 #[derive(Clone)]
-pub struct RpcClient {
+pub(crate) struct RpcClient {
     client: Client,
     url: String,
     auth_token: Option<String>,
@@ -31,7 +34,7 @@ struct RpcError {
 }
 
 impl RpcClient {
-    pub fn new(url: &str, auth_token: Option<String>) -> Self {
+    pub(crate) fn new(url: &str, auth_token: Option<String>) -> Self {
         let client = Client::builder()
             .timeout(Duration::from_secs(300))
             .build()
@@ -72,20 +75,27 @@ impl RpcClient {
             .map_err(|e| format!("Invalid response: {}", e))?;
 
         if let Some(err) = rpc_resp.error {
-            debug_log!("[DEBUG] RPC error for method '{}': code={}, message='{}'", method, err.code, err.message);
+            debug_log!(
+                "[DEBUG] RPC error for method '{}': code={}, message='{}'",
+                method,
+                err.code,
+                err.message
+            );
             return Err(format!("RPC error {}: {}", err.code, err.message));
         }
 
-        rpc_resp.result.ok_or_else(|| "No result in response".to_string())
+        rpc_resp
+            .result
+            .ok_or_else(|| "No result in response".to_string())
     }
 
-    pub async fn test_connection(&self) -> Result<(String, u64), String> {
+    pub(crate) async fn test_connection(&self) -> Result<(String, u64), String> {
         let network = self.get_network().await?;
         let height = self.get_block_height().await?;
         Ok((network, height))
     }
 
-    pub async fn get_network(&self) -> Result<String, String> {
+    pub(crate) async fn get_network(&self) -> Result<String, String> {
         let result = self.call("node_network", json!([])).await?;
         // Response: {"network": "main"} or just "main"
         if let Some(s) = result.as_str() {
@@ -97,7 +107,7 @@ impl RpcClient {
         Err(format!("Invalid network response: {}", result))
     }
 
-    pub async fn get_block_height(&self) -> Result<u64, String> {
+    pub(crate) async fn get_block_height(&self) -> Result<u64, String> {
         let result = self.call("chain_height", json!([])).await?;
         // Response: {"height": 12345} or just 12345
         if let Some(n) = result.as_u64() {
@@ -109,37 +119,50 @@ impl RpcClient {
         Err(format!("Invalid height response: {}", result))
     }
 
-    pub async fn get_balance(&self) -> Result<Value, String> {
+    pub(crate) async fn get_balance(&self) -> Result<Value, String> {
         self.call("personal_getBalance", json!([])).await
     }
 
-    pub async fn generate_address(&self, key_type: &str) -> Result<String, String> {
-        let result = self.call("personal_generateAddress", json!([key_type])).await?;
-        result.as_str().map(|s| s.to_string()).ok_or("Invalid address response".to_string())
+    pub(crate) async fn generate_address(&self, key_type: &str) -> Result<String, String> {
+        let result = self
+            .call("personal_generateAddress", json!([key_type]))
+            .await?;
+        result
+            .as_str()
+            .map(|s| s.to_string())
+            .ok_or("Invalid address response".to_string())
     }
 
-    pub async fn send(&self, address: &str, amount: &str, fee: &str) -> Result<Value, String> {
-        self.call("personal_send", json!([address, amount, fee])).await
+    pub(crate) async fn send(
+        &self,
+        address: &str,
+        amount: &str,
+        fee: &str,
+    ) -> Result<Value, String> {
+        self.call("personal_send", json!([address, amount, fee]))
+            .await
     }
 
-    pub async fn incoming_history(&self) -> Result<Value, String> {
+    pub(crate) async fn incoming_history(&self) -> Result<Value, String> {
         self.call("personal_incomingHistory", json!([])).await
     }
 
-    pub async fn outgoing_history(&self) -> Result<Value, String> {
+    pub(crate) async fn outgoing_history(&self) -> Result<Value, String> {
         self.call("personal_outgoingHistory", json!([])).await
     }
 
-    pub async fn unspent_utxos(&self) -> Result<Value, String> {
+    pub(crate) async fn unspent_utxos(&self) -> Result<Value, String> {
         self.call("personal_unspentUtxos", json!([])).await
     }
 
-    pub async fn claim_utxo(&self, utxo_data: &str) -> Result<Value, String> {
+    pub(crate) async fn claim_utxo(&self, utxo_data: &str) -> Result<Value, String> {
         self.call("personal_claimUtxo", json!([utxo_data])).await
     }
 
-    pub async fn validate_address(&self, address: &str) -> Result<bool, String> {
-        let result = self.call("wallet_validateAddress", json!([address])).await?;
+    pub(crate) async fn validate_address(&self, address: &str) -> Result<bool, String> {
+        let result = self
+            .call("wallet_validateAddress", json!([address]))
+            .await?;
         // Response formats:
         // - bool: true/false
         // - object with addressType: {"addressType":"generation",...} means valid
@@ -165,13 +188,17 @@ impl RpcClient {
 
     /// Get the current chain tip block (includes mutator set accumulator).
     /// Method: chain_tip
-    pub async fn get_tip(&self) -> Result<Value, String> {
+    pub(crate) async fn get_tip(&self) -> Result<Value, String> {
         self.call("chain_tip", json!([])).await
     }
 
     /// Get wallet-optimized blocks by height range.
     /// Method: wallet_getBlocks — returns RpcWalletBlock (lighter than full Block)
-    pub async fn get_wallet_blocks(&self, from_height: u64, to_height: u64) -> Result<Value, String> {
+    pub(crate) async fn get_wallet_blocks(
+        &self,
+        from_height: u64,
+        to_height: u64,
+    ) -> Result<Value, String> {
         use neptune_cash::application::json_rpc::core::model::message::GetBlocksRequest;
         use neptune_cash::protocol::consensus::block::block_height::BlockHeight;
 
@@ -179,33 +206,31 @@ impl RpcClient {
             from_height: BlockHeight::from(from_height),
             to_height: BlockHeight::from(to_height),
         };
-        let params = serde_json::to_value(&request)
-            .map_err(|e| format!("Serialize request: {}", e))?;
+        let params =
+            serde_json::to_value(&request).map_err(|e| format!("Serialize request: {}", e))?;
         self.call("wallet_getBlocks", params).await
     }
 
     /// Restore membership proofs for spending UTXOs.
     /// Method: wallet_restoreMembershipProof
     /// Params are pre-serialized via RestoreMembershipProofRequest (Serialize_tuple)
-    pub async fn restore_membership_proof(
-        &self,
-        params: &Value,
-    ) -> Result<Value, String> {
+    pub(crate) async fn restore_membership_proof(&self, params: &Value) -> Result<Value, String> {
         // params is already serialized from RestoreMembershipProofRequest
         // which is Serialize_tuple, so it's already an array like [[...]]
-        self.call("wallet_restoreMembershipProof", params.clone()).await
+        self.call("wallet_restoreMembershipProof", params.clone())
+            .await
     }
 
     /// Submit a locally-built transaction.
     /// Method: wallet_submitTransaction
     /// Params are pre-serialized via SubmitTransactionRequest (Serialize_tuple)
-    pub async fn submit_transaction(&self, params: &Value) -> Result<Value, String> {
+    pub(crate) async fn submit_transaction(&self, params: &Value) -> Result<Value, String> {
         self.call("wallet_submitTransaction", params.clone()).await
     }
 
     /// Check if a transaction was mined by checking its outputs.
     /// Method: utxoindex_wasMined
-    pub async fn was_mined(&self, params: &Value) -> Result<Value, String> {
+    pub(crate) async fn was_mined(&self, params: &Value) -> Result<Value, String> {
         self.call("utxoindex_wasMined", params.clone()).await
     }
 
@@ -213,7 +238,7 @@ impl RpcClient {
 
     /// Find blocks containing announcements matching our flags.
     /// Method: utxoindex_blockHeightsByFlags
-    pub async fn block_heights_by_flags(
+    pub(crate) async fn block_heights_by_flags(
         &self,
         flags: &[neptune_cash::state::wallet::address::announcement_flag::AnnouncementFlag],
     ) -> Result<Vec<u64>, String> {
@@ -223,11 +248,13 @@ impl RpcClient {
         let request = BlockHeightsByFlagsRequest {
             announcement_flags: flags.to_vec(),
         };
-        let params = serde_json::to_value(&request)
-            .map_err(|e| format!("Serialize request: {}", e))?;
+        let params =
+            serde_json::to_value(&request).map_err(|e| format!("Serialize request: {}", e))?;
 
-        debug_log!("[DEBUG] blockHeightsByFlags params: {}",
-            serde_json::to_string(&params).unwrap_or_default());
+        debug_log!(
+            "[DEBUG] blockHeightsByFlags params: {}",
+            serde_json::to_string(&params).unwrap_or_default()
+        );
 
         let result = match self.call("utxoindex_blockHeightsByFlags", params).await {
             Ok(r) => r,
@@ -236,10 +263,9 @@ impl RpcClient {
                 // If utxoindex is not available, return empty — the UTXO index
                 // namespace might not be enabled on this supporter
                 if e.contains("-32601") || e.contains("Method not found") {
-                    return Err(
-                        "Supporter does not have UTXO index enabled. \
-                         Ask the node operator to run with --utxo-index flag.".to_string()
-                    );
+                    return Err("Supporter does not have UTXO index enabled. \
+                         Ask the node operator to run with --utxo-index flag."
+                        .to_string());
                 }
                 return Err(e);
             }
@@ -260,22 +286,24 @@ impl RpcClient {
 
     /// Get transaction kernel for a block at given height.
     /// Method: archival_getBlockTransactionKernel
-    pub async fn get_block_transaction_kernel(
+    pub(crate) async fn get_block_transaction_kernel(
         &self,
         height: u64,
     ) -> Result<Option<Value>, String> {
         use neptune_cash::application::json_rpc::core::model::message::GetBlockTransactionKernelRequest;
-        use neptune_cash::protocol::consensus::block::block_selector::BlockSelector;
         use neptune_cash::protocol::consensus::block::block_height::BlockHeight;
+        use neptune_cash::protocol::consensus::block::block_selector::BlockSelector;
 
         let request = GetBlockTransactionKernelRequest {
             selector: BlockSelector::Height(BlockHeight::from(height)),
         };
-        let params = serde_json::to_value(&request)
-            .map_err(|e| format!("Serialize request: {}", e))?;
+        let params =
+            serde_json::to_value(&request).map_err(|e| format!("Serialize request: {}", e))?;
 
-        debug_log!("[DEBUG] getBlockTransactionKernel params: {}",
-            serde_json::to_string(&params).unwrap_or_default());
+        debug_log!(
+            "[DEBUG] getBlockTransactionKernel params: {}",
+            serde_json::to_string(&params).unwrap_or_default()
+        );
 
         let result = self
             .call("archival_getBlockTransactionKernel", params)
@@ -300,7 +328,7 @@ impl RpcClient {
     /// HashSet, so we query one UTXO at a time for an unambiguous mapping.
     ///
     /// Method: utxoindex_blockHeightsByAbsoluteIndexSets
-    pub async fn block_height_where_spent(
+    pub(crate) async fn block_height_where_spent(
         &self,
         absolute_index_set: &Value,
     ) -> Result<Option<u64>, String> {
@@ -318,7 +346,12 @@ impl RpcClient {
             .get("block_heights")
             .or_else(|| result.get("blockHeights"))
             .and_then(|v| v.as_array())
-            .ok_or_else(|| format!("Invalid blockHeightsByAbsoluteIndexSets response: {}", result))?;
+            .ok_or_else(|| {
+                format!(
+                    "Invalid blockHeightsByAbsoluteIndexSets response: {}",
+                    result
+                )
+            })?;
 
         // Take the first (and should be only) height; return None if empty.
         Ok(heights_array.first().and_then(|v| v.as_u64()))
