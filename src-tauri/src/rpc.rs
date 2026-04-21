@@ -1,359 +1,93 @@
-use std::time::Duration;
+//! JSON-RPC transport for neptune-core supporter nodes.
+//!
+//! We implement neptune-cash's [`Transport`] trait. Because neptune-cash
+//! provides a blanket `impl<T: Transport> RpcApi for T`, implementing
+//! `Transport` gives us every typed RPC method (`tip`, `height`, `network`,
+//! `get_blocks`, `was_mined`, `restore_membership_proof`,
+//! `submit_transaction`, `block_heights_by_flags`,
+//! `block_heights_by_absolute_index_sets`, ...) for free — no hand-rolled
+//! request/response parsing required.
+//!
+//! Equivalent to the official `neptune-rpc-client` crate, but built on
+//! reqwest with `rustls-tls` so we don't pull OpenSSL into Android builds.
 
+use async_trait::async_trait;
+use neptune_cash::application::json_rpc::core::api::client::transport::Transport;
+use neptune_cash::application::json_rpc::core::api::rpc::RpcApi;
+use neptune_cash::application::json_rpc::core::model::json::{
+    JsonError, JsonRequest, JsonResponse, JsonResult,
+};
 use reqwest::Client;
-use serde::Deserialize;
-use serde::Serialize;
-use serde_json::json;
 use serde_json::Value;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
+use std::time::Duration;
 
 #[derive(Clone)]
 pub(crate) struct RpcClient {
-    client: Client,
     url: String,
-    auth_token: Option<String>,
-}
-
-#[derive(Serialize)]
-struct RpcRequest {
-    jsonrpc: &'static str,
-    method: String,
-    params: Value,
-    id: u64,
-}
-
-#[derive(Deserialize)]
-struct RpcResponse {
-    result: Option<Value>,
-    error: Option<RpcError>,
-}
-
-#[derive(Deserialize)]
-struct RpcError {
-    code: i64,
-    message: String,
+    client: Client,
+    id_counter: Arc<AtomicU64>,
 }
 
 impl RpcClient {
-    pub(crate) fn new(url: &str, auth_token: Option<String>) -> Self {
+    pub(crate) fn new(url: &str, _auth_token: Option<String>) -> Self {
         let client = Client::builder()
             .timeout(Duration::from_secs(300))
             .build()
             .expect("Failed to create HTTP client");
         Self {
-            client,
             url: url.to_string(),
-            auth_token,
+            client,
+            id_counter: Arc::new(AtomicU64::new(0)),
         }
     }
 
-    async fn call(&self, method: &str, params: Value) -> Result<Value, String> {
-        let req = RpcRequest {
-            jsonrpc: "2.0",
+    /// Ping the node: returns (network, tip height). Any RPC error is
+    /// converted to a String so call sites don't need to match on RpcError.
+    pub(crate) async fn test_connection(&self) -> Result<(String, u64), String> {
+        let network = self
+            .network()
+            .await
+            .map_err(|e| format!("network: {}", e))?;
+        let height = self.height().await.map_err(|e| format!("height: {}", e))?;
+        Ok((network.network, u64::from(height.height)))
+    }
+}
+
+#[async_trait]
+impl Transport for RpcClient {
+    async fn call(&self, method: &str, params: Value) -> JsonResult<Value> {
+        let req = JsonRequest {
+            jsonrpc: Some("2.0".to_string()),
             method: method.to_string(),
             params,
-            id: 1,
+            id: Some(self.id_counter.fetch_add(1, Ordering::SeqCst).into()),
         };
 
-        let mut builder = self.client.post(&self.url);
-        if let Some(token) = &self.auth_token {
-            builder = builder.header("Authorization", format!("Bearer {}", token));
-        }
-
-        let resp = builder
+        let resp = self
+            .client
+            .post(&self.url)
             .json(&req)
             .send()
             .await
-            .map_err(|e| format!("Connection failed: {}", e))?;
-
-        if !resp.status().is_success() {
-            return Err(format!("HTTP error: {}", resp.status()));
-        }
-
-        let rpc_resp: RpcResponse = resp
-            .json()
-            .await
-            .map_err(|e| format!("Invalid response: {}", e))?;
-
-        if let Some(err) = rpc_resp.error {
-            debug_log!(
-                "[DEBUG] RPC error for method '{}': code={}, message='{}'",
-                method,
-                err.code,
-                err.message
-            );
-            return Err(format!("RPC error {}: {}", err.code, err.message));
-        }
-
-        rpc_resp
-            .result
-            .ok_or_else(|| "No result in response".to_string())
-    }
-
-    pub(crate) async fn test_connection(&self) -> Result<(String, u64), String> {
-        let network = self.get_network().await?;
-        let height = self.get_block_height().await?;
-        Ok((network, height))
-    }
-
-    pub(crate) async fn get_network(&self) -> Result<String, String> {
-        let result = self.call("node_network", json!([])).await?;
-        // Response: {"network": "main"} or just "main"
-        if let Some(s) = result.as_str() {
-            return Ok(s.to_string());
-        }
-        if let Some(s) = result.get("network").and_then(|v| v.as_str()) {
-            return Ok(s.to_string());
-        }
-        Err(format!("Invalid network response: {}", result))
-    }
-
-    pub(crate) async fn get_block_height(&self) -> Result<u64, String> {
-        let result = self.call("chain_height", json!([])).await?;
-        // Response: {"height": 12345} or just 12345
-        if let Some(n) = result.as_u64() {
-            return Ok(n);
-        }
-        if let Some(n) = result.get("height").and_then(|v| v.as_u64()) {
-            return Ok(n);
-        }
-        Err(format!("Invalid height response: {}", result))
-    }
-
-    pub(crate) async fn get_balance(&self) -> Result<Value, String> {
-        self.call("personal_getBalance", json!([])).await
-    }
-
-    pub(crate) async fn generate_address(&self, key_type: &str) -> Result<String, String> {
-        let result = self
-            .call("personal_generateAddress", json!([key_type]))
-            .await?;
-        result
-            .as_str()
-            .map(|s| s.to_string())
-            .ok_or("Invalid address response".to_string())
-    }
-
-    pub(crate) async fn send(
-        &self,
-        address: &str,
-        amount: &str,
-        fee: &str,
-    ) -> Result<Value, String> {
-        self.call("personal_send", json!([address, amount, fee]))
-            .await
-    }
-
-    pub(crate) async fn incoming_history(&self) -> Result<Value, String> {
-        self.call("personal_incomingHistory", json!([])).await
-    }
-
-    pub(crate) async fn outgoing_history(&self) -> Result<Value, String> {
-        self.call("personal_outgoingHistory", json!([])).await
-    }
-
-    pub(crate) async fn unspent_utxos(&self) -> Result<Value, String> {
-        self.call("personal_unspentUtxos", json!([])).await
-    }
-
-    pub(crate) async fn claim_utxo(&self, utxo_data: &str) -> Result<Value, String> {
-        self.call("personal_claimUtxo", json!([utxo_data])).await
-    }
-
-    pub(crate) async fn validate_address(&self, address: &str) -> Result<bool, String> {
-        let result = self
-            .call("wallet_validateAddress", json!([address]))
-            .await?;
-        // Response formats:
-        // - bool: true/false
-        // - object with addressType: {"addressType":"generation",...} means valid
-        // - object with "valid" field
-        if let Some(b) = result.as_bool() {
-            return Ok(b);
-        }
-        if let Some(b) = result.get("valid").and_then(|v| v.as_bool()) {
-            return Ok(b);
-        }
-        // If response has "addressType", the address is valid
-        if result.get("addressType").is_some() || result.get("address_type").is_some() {
-            return Ok(true);
-        }
-        // If we got any non-error response, address is valid
-        if result.is_object() && !result.get("error").is_some() {
-            return Ok(true);
-        }
-        Ok(false)
-    }
-
-    // ── Chain State Endpoints ────────────────────────────────────
-
-    /// Get the current chain tip block (includes mutator set accumulator).
-    /// Method: chain_tip
-    pub(crate) async fn get_tip(&self) -> Result<Value, String> {
-        self.call("chain_tip", json!([])).await
-    }
-
-    /// Get wallet-optimized blocks by height range.
-    /// Method: wallet_getBlocks — returns RpcWalletBlock (lighter than full Block)
-    pub(crate) async fn get_wallet_blocks(
-        &self,
-        from_height: u64,
-        to_height: u64,
-    ) -> Result<Value, String> {
-        use neptune_cash::application::json_rpc::core::model::message::GetBlocksRequest;
-        use neptune_cash::protocol::consensus::block::block_height::BlockHeight;
-
-        let request = GetBlocksRequest {
-            from_height: BlockHeight::from(from_height),
-            to_height: BlockHeight::from(to_height),
-        };
-        let params =
-            serde_json::to_value(&request).map_err(|e| format!("Serialize request: {}", e))?;
-        self.call("wallet_getBlocks", params).await
-    }
-
-    /// Restore membership proofs for spending UTXOs.
-    /// Method: wallet_restoreMembershipProof
-    /// Params are pre-serialized via RestoreMembershipProofRequest (Serialize_tuple)
-    pub(crate) async fn restore_membership_proof(&self, params: &Value) -> Result<Value, String> {
-        // params is already serialized from RestoreMembershipProofRequest
-        // which is Serialize_tuple, so it's already an array like [[...]]
-        self.call("wallet_restoreMembershipProof", params.clone())
-            .await
-    }
-
-    /// Submit a locally-built transaction.
-    /// Method: wallet_submitTransaction
-    /// Params are pre-serialized via SubmitTransactionRequest (Serialize_tuple)
-    pub(crate) async fn submit_transaction(&self, params: &Value) -> Result<Value, String> {
-        self.call("wallet_submitTransaction", params.clone()).await
-    }
-
-    /// Check if a transaction was mined by checking its outputs.
-    /// Method: utxoindex_wasMined
-    pub(crate) async fn was_mined(&self, params: &Value) -> Result<Value, String> {
-        self.call("utxoindex_wasMined", params.clone()).await
-    }
-
-    // ── UTXO Scanning Endpoints ─────────────────────────────────
-
-    /// Find blocks containing announcements matching our flags.
-    /// Method: utxoindex_blockHeightsByFlags
-    pub(crate) async fn block_heights_by_flags(
-        &self,
-        flags: &[neptune_cash::state::wallet::address::announcement_flag::AnnouncementFlag],
-    ) -> Result<Vec<u64>, String> {
-        // Use neptune-cash's own request type to ensure exact serialization format
-        use neptune_cash::application::json_rpc::core::model::message::BlockHeightsByFlagsRequest;
-
-        let request = BlockHeightsByFlagsRequest {
-            announcement_flags: flags.to_vec(),
-        };
-        let params =
-            serde_json::to_value(&request).map_err(|e| format!("Serialize request: {}", e))?;
-
-        debug_log!(
-            "[DEBUG] blockHeightsByFlags params: {}",
-            serde_json::to_string(&params).unwrap_or_default()
-        );
-
-        let result = match self.call("utxoindex_blockHeightsByFlags", params).await {
-            Ok(r) => r,
-            Err(e) => {
-                debug_log!("[DEBUG] blockHeightsByFlags error: {}", e);
-                // If utxoindex is not available, return empty — the UTXO index
-                // namespace might not be enabled on this supporter
-                if e.contains("-32601") || e.contains("Method not found") {
-                    return Err("Supporter does not have UTXO index enabled. \
-                         Ask the node operator to run with --utxo-index flag."
-                        .to_string());
-                }
-                return Err(e);
-            }
-        };
-
-        // Response: {"block_heights": [1, 2, 3]} or {"blockHeights": [...]}
-        let heights = result
-            .get("block_heights")
-            .or_else(|| result.get("blockHeights"))
-            .and_then(|v| v.as_array())
-            .ok_or_else(|| format!("Invalid blockHeightsByFlags response: {}", result))?;
-
-        heights
-            .iter()
-            .map(|v| v.as_u64().ok_or_else(|| "Invalid block height".to_string()))
-            .collect()
-    }
-
-    /// Get transaction kernel for a block at given height.
-    /// Method: archival_getBlockTransactionKernel
-    pub(crate) async fn get_block_transaction_kernel(
-        &self,
-        height: u64,
-    ) -> Result<Option<Value>, String> {
-        use neptune_cash::application::json_rpc::core::model::message::GetBlockTransactionKernelRequest;
-        use neptune_cash::protocol::consensus::block::block_height::BlockHeight;
-        use neptune_cash::protocol::consensus::block::block_selector::BlockSelector;
-
-        let request = GetBlockTransactionKernelRequest {
-            selector: BlockSelector::Height(BlockHeight::from(height)),
-        };
-        let params =
-            serde_json::to_value(&request).map_err(|e| format!("Serialize request: {}", e))?;
-
-        debug_log!(
-            "[DEBUG] getBlockTransactionKernel params: {}",
-            serde_json::to_string(&params).unwrap_or_default()
-        );
-
-        let result = self
-            .call("archival_getBlockTransactionKernel", params)
-            .await?;
-
-        // Response: {"kernel": {...}} or {"kernel": null}
-        let kernel = result.get("kernel").unwrap_or(&result);
-        if kernel.is_null() {
-            Ok(None)
-        } else {
-            Ok(Some(kernel.clone()))
-        }
-    }
-
-    /// Find the block height where the given absolute index set appears
-    /// as a removal record (i.e. where the UTXO was spent).
-    ///
-    /// Returns `Some(height)` if the UTXO has been spent on the canonical
-    /// chain, `None` if it is unspent.
-    ///
-    /// Note: the server's underlying method deduplicates results into a
-    /// HashSet, so we query one UTXO at a time for an unambiguous mapping.
-    ///
-    /// Method: utxoindex_blockHeightsByAbsoluteIndexSets
-    pub(crate) async fn block_height_where_spent(
-        &self,
-        absolute_index_set: &Value,
-    ) -> Result<Option<u64>, String> {
-        // Server expects params as a tuple: [[index_set]]
-        // Request body: {"absolute_index_sets": [index_set]} serialized as tuple
-        let params = json!([[absolute_index_set]]);
-
-        let result = self
-            .call("utxoindex_blockHeightsByAbsoluteIndexSets", params)
-            .await?;
-
-        // Response: {"blockHeights": [h1, h2, ...]} or {"block_heights": [...]}
-        // Empty array means unspent; non-empty means spent.
-        let heights_array = result
-            .get("block_heights")
-            .or_else(|| result.get("blockHeights"))
-            .and_then(|v| v.as_array())
-            .ok_or_else(|| {
-                format!(
-                    "Invalid blockHeightsByAbsoluteIndexSets response: {}",
-                    result
-                )
+            .map_err(|e| JsonError::ConnectionFailed {
+                message: e.to_string(),
             })?;
 
-        // Take the first (and should be only) height; return None if empty.
-        Ok(heights_array.first().and_then(|v| v.as_u64()))
+        if !resp.status().is_success() {
+            return Err(JsonError::HttpError {
+                message: resp.status().to_string(),
+            });
+        }
+
+        let value: Value = resp.json().await.map_err(|_| JsonError::ParseError)?;
+        let response: JsonResponse =
+            serde_json::from_value(value).map_err(|_| JsonError::ParseError)?;
+
+        match response {
+            JsonResponse::Success { result, .. } => Ok(result),
+            JsonResponse::Error { error, .. } => Err(error),
+        }
     }
 }

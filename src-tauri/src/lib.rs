@@ -17,13 +17,11 @@ mod seed;
 mod sync;
 mod transaction;
 
-use std::sync::Mutex;
-use std::time::Instant;
-
 use rpc::RpcClient;
 use serde::Serialize;
-use tauri::Manager;
-use tauri::State;
+use std::sync::Mutex;
+use std::time::Instant;
+use tauri::{Manager, State};
 use zeroize::Zeroize;
 
 /// Session auto-lock after 3 minutes of inactivity.
@@ -339,20 +337,16 @@ async fn send_transaction(
 
     // Early balance check + select UTXOs to cover amount
     use neptune_cash::api::export::UnlockedUtxo;
-    use neptune_cash::application::json_rpc::core::model::message::RestoreMembershipProofRequest;
-    use neptune_cash::application::json_rpc::core::model::wallet::block::RpcWalletBlock;
-    use neptune_cash::application::json_rpc::core::model::wallet::mutator_set::RpcMsMembershipSnapshot;
     use neptune_cash::prelude::triton_vm::prelude::Tip5;
     use neptune_cash::prelude::twenty_first::util_types::mmr::mmr_trait::Mmr;
     use neptune_cash::protocol::consensus::block::block_height::BlockHeight;
     use neptune_cash::protocol::consensus::block::block_kernel::BlockKernel;
+    use neptune_cash::protocol::proof_abstractions::mast_hash::MastHash;
     use neptune_cash::protocol::proof_abstractions::timestamp::Timestamp;
     use neptune_cash::state::wallet::transaction_output::TxOutput;
     use neptune_cash::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
     use neptune_cash::util_types::mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
-    use num_traits::CheckedAdd;
-    use num_traits::CheckedSub;
-    use num_traits::Zero;
+    use num_traits::{CheckedAdd, CheckedSub, Zero};
 
     let total_needed = amount_val
         .checked_add(&fee_val)
@@ -436,37 +430,33 @@ async fn send_transaction(
 
     // Step 3: Get chain tip
     debug_log!("[SEND] Step 3: Getting chain tip...");
-    let tip_json = rpc.get_tip().await?;
-    let tip_height = tip_json
-        .get("block")
-        .and_then(|b| b.get("kernel"))
-        .and_then(|k| k.get("header"))
-        .and_then(|h| h.get("height"))
-        .and_then(|h| h.as_u64())
-        .ok_or("Cannot parse tip height")?;
+    use neptune_cash::application::json_rpc::core::api::rpc::RpcApi;
+    let tip_resp = rpc.tip().await.map_err(|e| format!("tip: {}", e))?;
+    let tip_height = u64::from(tip_resp.block.kernel.header.height);
     debug_log!("[SEND] Chain tip at height {}", tip_height);
 
-    // Helper: parse wallet blocks
-    fn parse_wallet_blocks(
-        json: &serde_json::Value,
+    // Helper: fetch one block from the supporter and return its kernel + hash.
+    async fn fetch_block(
+        rpc: &RpcClient,
+        height: u64,
     ) -> Result<
-        Vec<(
+        (
             BlockKernel,
             neptune_cash::prelude::triton_vm::prelude::Digest,
-        )>,
+        ),
         String,
     > {
-        let blocks_json = json.get("blocks").cloned().unwrap_or(json.clone());
-        let rpc_blocks: Vec<RpcWalletBlock> = serde_json::from_value(blocks_json)
-            .map_err(|e| format!("Deserialize wallet blocks: {}", e))?;
-        Ok(rpc_blocks
-            .into_iter()
-            .map(|b| {
-                let hash = b.hash();
-                let kernel: BlockKernel = b.kernel.into();
-                (kernel, hash)
-            })
-            .collect())
+        use neptune_cash::application::json_rpc::core::api::rpc::RpcApi;
+        use neptune_cash::protocol::consensus::block::block_height::BlockHeight;
+        let bh = BlockHeight::from(height);
+        let resp = rpc
+            .get_blocks(bh, bh)
+            .await
+            .map_err(|e| format!("get_blocks: {}", e))?;
+        let block = resp.blocks.into_iter().next().ok_or("No block")?;
+        let hash = block.hash();
+        let kernel: BlockKernel = block.kernel.into();
+        Ok((kernel, hash))
     }
 
     // Step 4-7: For EACH selected UTXO: compute AOCL index, get membership proof, unlock
@@ -489,11 +479,7 @@ async fn send_transaction(
         let prev_aocl = if block_height == 0 {
             0u64
         } else {
-            let prev_json = rpc
-                .get_wallet_blocks(block_height - 1, block_height - 1)
-                .await?;
-            let prev_blocks = parse_wallet_blocks(&prev_json)?;
-            let (prev_kernel, prev_hash) = prev_blocks.into_iter().next().ok_or("No prev block")?;
+            let (prev_kernel, prev_hash) = fetch_block(&rpc, block_height - 1).await?;
             let prev_gf = prev_kernel
                 .guesser_fee_addition_records(prev_hash)
                 .map_err(|e| format!("Guesser fees: {}", e))?;
@@ -513,9 +499,7 @@ async fn send_transaction(
                 .all_addition_records(genesis_hash)
                 .map_err(|e| format!("Genesis addition records: {}", e))?
         } else {
-            let block_json = rpc.get_wallet_blocks(block_height, block_height).await?;
-            let blocks = parse_wallet_blocks(&block_json)?;
-            let (kernel, hash) = blocks.into_iter().next().ok_or("No block")?;
+            let (kernel, hash) = fetch_block(&rpc, block_height).await?;
             kernel
                 .all_addition_records(hash)
                 .map_err(|e| format!("Addition records: {}", e))?
@@ -562,19 +546,11 @@ async fn send_transaction(
         "[SEND] Step 6: Restoring {} membership proofs...",
         all_abs_index_sets.len()
     );
-    let restore_request = RestoreMembershipProofRequest {
-        absolute_index_sets: all_abs_index_sets,
-    };
-    let restore_params =
-        serde_json::to_value(&restore_request).map_err(|e| format!("Serialize: {}", e))?;
-    let proof_response_json = rpc.restore_membership_proof(&restore_params).await?;
-
-    let snapshot_json = proof_response_json
-        .get("snapshot")
-        .cloned()
-        .unwrap_or(proof_response_json.clone());
-    let snapshot: RpcMsMembershipSnapshot =
-        serde_json::from_value(snapshot_json).map_err(|e| format!("Parse snapshot: {}", e))?;
+    let restore_resp = rpc
+        .restore_membership_proof(all_abs_index_sets)
+        .await
+        .map_err(|e| format!("restore_membership_proof: {}", e))?;
+    let snapshot = restore_resp.snapshot;
     let tip_msa: MutatorSetAccumulator = snapshot.synced_mutator_set.into();
 
     // Create UnlockedUtxo for each input
@@ -723,14 +699,17 @@ async fn send_transaction(
     debug_log!("[SEND] Step 11: Submitting transaction...");
     let rpc_tx: neptune_cash::application::json_rpc::core::model::wallet::transaction::RpcTransaction = tx.try_into()
         .map_err(|e: String| format!("Convert to RPC transaction: {}", e))?;
-    use neptune_cash::application::json_rpc::core::model::message::SubmitTransactionRequest;
-    let submit_request = SubmitTransactionRequest {
-        transaction: rpc_tx,
-    };
-    let submit_params = serde_json::to_value(&submit_request)
-        .map_err(|e| format!("Serialize submit request: {}", e))?;
-    let submit_result = rpc.submit_transaction(&submit_params).await?;
-    debug_log!("[SEND] Submitted! Response: {}", submit_result);
+    let submit_resp = rpc
+        .submit_transaction(rpc_tx)
+        .await
+        .map_err(|e| format!("submit_transaction: {}", e))?;
+    if !submit_resp.success {
+        return Err(
+            "Supporter rejected the transaction (submit_transaction returned success=false)"
+                .to_string(),
+        );
+    }
+    debug_log!("[SEND] Submitted!");
 
     // Return addition records as JSON for tracking confirmation via wasMined
     use neptune_cash::application::json_rpc::core::model::block::transaction_kernel::RpcAdditionRecord;
@@ -815,10 +794,10 @@ async fn check_transaction_mined(
     check_session(&state)?;
     let rpc = get_rpc(&state)?;
 
+    use neptune_cash::application::json_rpc::core::api::rpc::RpcApi;
     use neptune_cash::application::json_rpc::core::model::block::transaction_kernel::RpcAdditionRecord;
-    use neptune_cash::application::json_rpc::core::model::message::WasMinedRequest;
 
-    // Deserialize RpcAdditionRecords from JSON strings
+    // Deserialize RpcAdditionRecords from JSON strings stored at send-time
     let mut addition_records = Vec::new();
     for json_str in &addition_record_hexes {
         let ar: RpcAdditionRecord = serde_json::from_str(json_str)
@@ -830,25 +809,11 @@ async fn check_transaction_mined(
         addition_records.len()
     );
 
-    let request = WasMinedRequest {
-        absolute_index_sets: vec![], // we're checking outputs, not inputs
-        addition_records,
-    };
-    let params = serde_json::to_value(&request).map_err(|e| format!("Serialize: {}", e))?;
-
-    let result = rpc.was_mined(&params).await?;
-    debug_log!(
-        "[CHECK_MINED] Response: {}",
-        serde_json::to_string(&result).unwrap_or_default()
-    );
-
-    let heights: Vec<u64> = result
-        .get("blockHeights")
-        .or_else(|| result.get("block_heights"))
-        .and_then(|v| v.as_array())
-        .map(|arr| arr.iter().filter_map(|v| v.as_u64()).collect())
-        .unwrap_or_default();
-
+    let resp = rpc
+        .was_mined(vec![], addition_records) // we're checking outputs, not inputs
+        .await
+        .map_err(|e| format!("was_mined: {}", e))?;
+    let heights: Vec<u64> = resp.block_heights.into_iter().map(u64::from).collect();
     debug_log!("[CHECK_MINED] Block heights: {:?}", heights);
 
     // Auto-clear pending flag when transaction is confirmed (memory + disk)
@@ -975,63 +940,21 @@ fn get_rpc(state: &State<'_, AppState>) -> Result<RpcClient, String> {
 }
 
 // ── Query Commands ───────────────────────────────────────────
-
-#[tauri::command]
-async fn get_network(state: State<'_, AppState>) -> Result<String, String> {
-    get_rpc(&state)?.get_network().await
-}
+// The `personal_*` RPC namespace (balance, sendToAddress, history, ...) is
+// deliberately NOT exposed. That namespace requires the supporter node to
+// run a wallet on behalf of the caller — the wallet's seed would live on
+// the supporter. Our wallet is privacy-preserving: we derive keys and build
+// transactions locally, and only use the `node`, `chain`, `wallet`,
+// `archival`, and `utxoindex` namespaces on the supporter.
 
 #[tauri::command]
 async fn get_block_height(state: State<'_, AppState>) -> Result<u64, String> {
-    get_rpc(&state)?.get_block_height().await
-}
-
-#[tauri::command]
-async fn get_balance(state: State<'_, AppState>) -> Result<serde_json::Value, String> {
-    get_rpc(&state)?.get_balance().await
-}
-
-#[tauri::command]
-async fn generate_address(state: State<'_, AppState>, key_type: String) -> Result<String, String> {
-    get_rpc(&state)?.generate_address(&key_type).await
-}
-
-#[tauri::command]
-async fn send_coins(
-    state: State<'_, AppState>,
-    address: String,
-    amount: String,
-    fee: String,
-) -> Result<serde_json::Value, String> {
-    get_rpc(&state)?.send(&address, &amount, &fee).await
-}
-
-#[tauri::command]
-async fn get_incoming_history(state: State<'_, AppState>) -> Result<serde_json::Value, String> {
-    get_rpc(&state)?.incoming_history().await
-}
-
-#[tauri::command]
-async fn get_outgoing_history(state: State<'_, AppState>) -> Result<serde_json::Value, String> {
-    get_rpc(&state)?.outgoing_history().await
-}
-
-#[tauri::command]
-async fn get_unspent_utxos(state: State<'_, AppState>) -> Result<serde_json::Value, String> {
-    get_rpc(&state)?.unspent_utxos().await
-}
-
-#[tauri::command]
-async fn claim_utxo(
-    state: State<'_, AppState>,
-    utxo_data: String,
-) -> Result<serde_json::Value, String> {
-    get_rpc(&state)?.claim_utxo(&utxo_data).await
-}
-
-#[tauri::command]
-async fn validate_address(state: State<'_, AppState>, address: String) -> Result<bool, String> {
-    get_rpc(&state)?.validate_address(&address).await
+    use neptune_cash::application::json_rpc::core::api::rpc::RpcApi;
+    let resp = get_rpc(&state)?
+        .height()
+        .await
+        .map_err(|e| format!("height: {}", e))?;
+    Ok(u64::from(resp.height))
 }
 
 // ── App Entry ────────────────────────────────────────────────
@@ -1076,16 +999,7 @@ pub fn run() {
             connect_node,
             disconnect_node,
             // Queries
-            get_network,
             get_block_height,
-            get_balance,
-            generate_address,
-            send_coins,
-            get_incoming_history,
-            get_outgoing_history,
-            get_unspent_utxos,
-            claim_utxo,
-            validate_address,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
