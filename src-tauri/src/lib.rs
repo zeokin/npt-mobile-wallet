@@ -17,12 +17,16 @@ mod seed;
 mod sync;
 mod transaction;
 
-use rpc::RpcClient;
-use serde::Serialize;
 use std::sync::Mutex;
 use std::time::Instant;
-use tauri::{Manager, State};
+
+use rpc::RpcClient;
+use serde::Serialize;
+use tauri::Manager;
+use tauri::State;
 use zeroize::Zeroize;
+
+use crate::seed::is_v2_format;
 
 /// Session auto-lock after 3 minutes of inactivity.
 const SESSION_TIMEOUT_SECS: u64 = 180;
@@ -162,7 +166,7 @@ fn unlock_wallet(
             *state.lockout_until.lock().unwrap() = None;
 
             // Auto-migrate v1 (SHA-256) seed files to v2 (Argon2id) on unlock
-            if !encrypted.starts_with(b"NPT\x00") {
+            if !is_v2_format(&encrypted) {
                 seed::migrate_v1_to_v2(&path, &entropy, &pin)?;
             }
 
@@ -340,13 +344,13 @@ async fn send_transaction(
     use neptune_cash::prelude::triton_vm::prelude::Tip5;
     use neptune_cash::prelude::twenty_first::util_types::mmr::mmr_trait::Mmr;
     use neptune_cash::protocol::consensus::block::block_height::BlockHeight;
-    use neptune_cash::protocol::consensus::block::block_kernel::BlockKernel;
-    use neptune_cash::protocol::proof_abstractions::mast_hash::MastHash;
     use neptune_cash::protocol::proof_abstractions::timestamp::Timestamp;
     use neptune_cash::state::wallet::transaction_output::TxOutput;
     use neptune_cash::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
     use neptune_cash::util_types::mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
-    use num_traits::{CheckedAdd, CheckedSub, Zero};
+    use num_traits::CheckedAdd;
+    use num_traits::CheckedSub;
+    use num_traits::Zero;
 
     let total_needed = amount_val
         .checked_add(&fee_val)
