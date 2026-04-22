@@ -4165,6 +4165,7 @@ dependencies = [
  "aes-gcm",
  "anyhow",
  "argon2",
+ "async-trait",
  "bincode",
  "bip39",
  "hex",

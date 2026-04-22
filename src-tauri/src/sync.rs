@@ -12,19 +12,19 @@
 //! Performance: kernel fetches, wallet block fetches, and bloom filter checks
 //! are all parallelized. Wallet blocks are cached to avoid duplicate fetches.
 
-use std::collections::HashMap;
-use std::collections::HashSet;
-
 use neptune_cash::api::export::KeyType;
 use neptune_cash::application::config::network::Network;
+use neptune_cash::application::json_rpc::core::api::rpc::RpcApi;
 use neptune_cash::prelude::triton_vm::prelude::BFieldElement;
+use neptune_cash::protocol::consensus::block::block_height::BlockHeight;
+use neptune_cash::protocol::consensus::block::block_selector::BlockSelector;
 use neptune_cash::protocol::consensus::block::Block;
 use neptune_cash::state::wallet::address::announcement_flag::AnnouncementFlag;
 use neptune_cash::state::wallet::address::ReceivingAddress;
 use neptune_cash::state::wallet::address::SpendingKey;
 use neptune_cash::state::wallet::wallet_entropy::WalletEntropy;
-use serde::Deserialize;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
+use std::collections::{HashMap, HashSet};
 
 use crate::rpc::RpcClient;
 
@@ -171,7 +171,24 @@ pub(crate) async fn scan_for_utxos(
     let premine_utxos = check_premine(&keys, Network::Main);
 
     // Step 2: Query supporter for block heights matching our flags (1 RPC call)
-    let block_heights = rpc.block_heights_by_flags(&flags).await?;
+    let block_heights_resp =
+        rpc.block_heights_by_flags(flags.clone())
+            .await
+            .map_err(|e| {
+                match e {
+            neptune_cash::application::json_rpc::core::api::rpc::RpcError::Server(
+                neptune_cash::application::json_rpc::core::model::json::JsonError::MethodNotFound,
+            ) => "Supporter does not have UTXO index enabled. \
+                  Ask the node operator to run with --utxo-index flag."
+                .to_string(),
+            other => format!("block_heights_by_flags: {}", other),
+        }
+            })?;
+    let block_heights: Vec<u64> = block_heights_resp
+        .block_heights
+        .into_iter()
+        .map(u64::from)
+        .collect();
     debug_log!("[SYNC] Found {} candidate blocks", block_heights.len());
 
     if block_heights.is_empty() && premine_utxos.is_empty() {
@@ -192,19 +209,32 @@ pub(crate) async fn scan_for_utxos(
     for &height in &block_heights {
         let rpc_clone = rpc.clone();
         kernel_handles.push(tokio::spawn(async move {
-            (height, rpc_clone.get_block_transaction_kernel(height).await)
+            let selector = BlockSelector::Height(BlockHeight::from(height));
+            (
+                height,
+                rpc_clone.get_block_transaction_kernel(selector).await,
+            )
         }));
     }
 
-    // Collect kernel results into ordered map
+    // Collect kernel results into ordered map. We re-serialize the typed
+    // kernel to JSON so the existing announcement-parsing loop below can
+    // keep using the flexible JSON accessors unchanged.
     let mut kernels: Vec<(u64, serde_json::Value)> = Vec::new();
     for handle in kernel_handles {
         let (height, result) = handle
             .await
             .map_err(|e| format!("Kernel fetch task error: {}", e))?;
-        match result? {
-            Some(kernel_json) => kernels.push((height, kernel_json)),
-            None => continue,
+        match result {
+            Ok(resp) => match resp.kernel {
+                Some(kernel) => {
+                    let kernel_json = serde_json::to_value(&kernel)
+                        .map_err(|e| format!("Serialize kernel: {}", e))?;
+                    kernels.push((height, kernel_json));
+                }
+                None => continue,
+            },
+            Err(e) => return Err(format!("get_block_transaction_kernel: {}", e)),
         }
     }
     debug_log!("[SYNC] Got {} block kernels", kernels.len());
@@ -314,7 +344,6 @@ pub(crate) async fn scan_for_utxos(
 
     // Step 5: Fetch wallet blocks (cached + parallel)
     // Collect all unique block heights we need
-    use neptune_cash::application::json_rpc::core::model::wallet::block::RpcWalletBlock;
     use neptune_cash::prelude::triton_vm::prelude::Digest;
     use neptune_cash::prelude::twenty_first::util_types::mmr::mmr_trait::Mmr;
     use neptune_cash::protocol::consensus::block::block_kernel::BlockKernel;
@@ -336,7 +365,8 @@ pub(crate) async fn scan_for_utxos(
     for &h in &needed_heights {
         let rpc_clone = rpc.clone();
         block_handles.push(tokio::spawn(async move {
-            (h, rpc_clone.get_wallet_blocks(h, h).await)
+            let bh = BlockHeight::from(h);
+            (h, rpc_clone.get_blocks(bh, bh).await)
         }));
     }
 
@@ -346,14 +376,11 @@ pub(crate) async fn scan_for_utxos(
         let (h, result) = handle
             .await
             .map_err(|e| format!("Block fetch task error: {}", e))?;
-        if let Ok(json) = result {
-            let blocks_json = json.get("blocks").cloned().unwrap_or(json);
-            if let Ok(rpc_blocks) = serde_json::from_value::<Vec<RpcWalletBlock>>(blocks_json) {
-                if let Some(rpc_block) = rpc_blocks.into_iter().next() {
-                    let hash = rpc_block.hash();
-                    let kernel: BlockKernel = rpc_block.kernel.into();
-                    block_cache.insert(h, (kernel, hash));
-                }
+        if let Ok(resp) = result {
+            if let Some(rpc_block) = resp.blocks.into_iter().next() {
+                let hash = rpc_block.hash();
+                let kernel: BlockKernel = rpc_block.kernel.into();
+                block_cache.insert(h, (kernel, hash));
             }
         }
     }
@@ -373,7 +400,7 @@ pub(crate) async fn scan_for_utxos(
     // Step 6: Compute AOCL indices using cached blocks, prepare spent-block checks
     struct SpentCheck {
         utxo_idx: usize,
-        abs_json: serde_json::Value,
+        abs_set: AbsoluteIndexSet,
     }
     let mut spent_checks: Vec<SpentCheck> = Vec::new();
 
@@ -452,12 +479,10 @@ pub(crate) async fn scan_for_utxos(
 
                 // Prepare spent-block check (will run in parallel)
                 let abs_set = AbsoluteIndexSet::compute(item, sr, rp, aocl_idx);
-                if let Ok(abs_json) = serde_json::to_value(&abs_set) {
-                    spent_checks.push(SpentCheck {
-                        utxo_idx: idx,
-                        abs_json,
-                    });
-                }
+                spent_checks.push(SpentCheck {
+                    utxo_idx: idx,
+                    abs_set,
+                });
                 found = true;
                 break;
             }
@@ -483,10 +508,12 @@ pub(crate) async fn scan_for_utxos(
     for check in spent_checks {
         let rpc_clone = rpc.clone();
         spent_handles.push(tokio::spawn(async move {
-            (
-                check.utxo_idx,
-                rpc_clone.block_height_where_spent(&check.abs_json).await,
-            )
+            // Query one index set at a time so the returned block heights
+            // map 1:1 with inputs (server dedups via HashSet when batched).
+            let resp = rpc_clone
+                .block_heights_by_absolute_index_sets(vec![check.abs_set])
+                .await;
+            (check.utxo_idx, resp)
         }));
     }
 
@@ -494,7 +521,9 @@ pub(crate) async fn scan_for_utxos(
         let (idx, result) = handle
             .await
             .map_err(|e| format!("Spent check task error: {}", e))?;
-        if let Ok(maybe_height) = result {
+        if let Ok(resp) = result {
+            // Empty → unspent; non-empty → first (only) entry is the spending block
+            let maybe_height = resp.block_heights.into_iter().next().map(u64::from);
             discovered[idx].spent_in_block = maybe_height;
             discovered[idx].likely_spent = maybe_height.is_some();
         }

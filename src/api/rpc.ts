@@ -64,16 +64,5 @@ export const connectNode = (url: string, authToken?: string) =>
   invoke<ConnectionInfo>("connect_node", { url, authToken: authToken || null });
 export const disconnectNode = () => invoke<void>("disconnect_node");
 
-// Queries
-export const getBalance = () => invoke<any>("get_balance");
-export const generateAddress = (keyType: string = "generation") =>
-  invoke<string>("generate_address", { keyType });
-export const sendCoins = (address: string, amount: string, fee: string) =>
-  invoke<any>("send_coins", { address, amount, fee });
-export const getIncomingHistory = () => invoke<any>("get_incoming_history");
-export const getOutgoingHistory = () => invoke<any>("get_outgoing_history");
-export const getUnspentUtxos = () => invoke<any>("get_unspent_utxos");
-export const claimUtxo = (utxoData: string) => invoke<any>("claim_utxo", { utxoData });
-export const validateAddress = (address: string) => invoke<boolean>("validate_address", { address });
-export const getNetwork = () => invoke<string>("get_network");
+// Chain queries
 export const getBlockHeight = () => invoke<number>("get_block_height");
