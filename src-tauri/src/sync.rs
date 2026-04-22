@@ -596,3 +596,44 @@ fn format_utxo_amount(utxo: &neptune_cash::protocol::consensus::transaction::utx
     let amount = utxo.get_native_currency_amount();
     format!("{}", amount)
 }
+
+#[cfg(test)]
+mod tests {
+    use itertools::Itertools;
+    use neptune_cash::api::export::NativeCurrencyAmount;
+
+    use super::*;
+    use crate::keys::wallet_entropy_from_phrase;
+
+    #[test]
+    fn can_idenfity_premine_utxo() {
+        let network = Network::Main;
+        let devnet_mnemonic = vec![
+            "margin", "quality", "divorce", "tuition", "notable", "squirrel", "park", "jar", "end",
+            "beauty", "attend", "cliff", "media", "letter", "private", "decline", "absurd",
+            "uniform",
+        ]
+        .into_iter()
+        .map(|x| x.to_string())
+        .collect_vec();
+        let entropy = wallet_entropy_from_phrase(&devnet_mnemonic).unwrap();
+        let devnet_key: SpendingKey = entropy.nth_generation_spending_key(0).into();
+        let premine_utxos = check_premine(&[(devnet_key, 0, "generation".to_owned())], network);
+        assert_eq!(1, premine_utxos.len(), "Should find 1 premine UTXO");
+        let premine_utxo = &premine_utxos[0];
+        assert_eq!(
+            NativeCurrencyAmount::coins(20),
+            premine_utxo.utxo.get_native_currency_amount(),
+            "Premine UTXO should have correct amount"
+        );
+        assert_eq!(
+            0, premine_utxo.block_height,
+            "Premine UTXO should be at block height 0"
+        );
+        assert_eq!(
+            0,
+            premine_utxo.aocl_leaf_index.unwrap(),
+            "Devnet's premine UTXO should be at AOCL index 0"
+        );
+    }
+}
