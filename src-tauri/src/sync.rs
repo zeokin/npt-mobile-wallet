@@ -17,6 +17,7 @@ use std::collections::HashSet;
 
 use neptune_cash::api::export::Digest;
 use neptune_cash::api::export::KeyType;
+use neptune_cash::api::export::Timestamp;
 use neptune_cash::api::export::Utxo;
 use neptune_cash::application::config::network::Network;
 use neptune_cash::application::json_rpc::core::api::rpc::RpcApi;
@@ -479,6 +480,15 @@ pub(crate) async fn scan_for_utxos(
     discovered = discovered
         .into_iter()
         .filter(|u| u.aocl_leaf_index.is_some())
+        .collect();
+
+    // Only track UTXOs where we know we can unlock all typescripts. Otherwise,
+    // the UTXO may carry an unresolvable typescript, or the UTXO may be time-
+    // locked.
+    let now = Timestamp::now();
+    discovered = discovered
+        .into_iter()
+        .filter(|u| u.utxo.can_spend_at(now))
         .collect();
 
     // Step 7: Run all spent-block checks in parallel
