@@ -12,6 +12,9 @@
 //! Performance: kernel fetches, wallet block fetches, and bloom filter checks
 //! are all parallelized. Wallet blocks are cached to avoid duplicate fetches.
 
+use std::collections::HashMap;
+use std::collections::HashSet;
+
 use neptune_cash::api::export::KeyType;
 use neptune_cash::application::config::network::Network;
 use neptune_cash::application::json_rpc::core::api::rpc::RpcApi;
@@ -23,8 +26,8 @@ use neptune_cash::state::wallet::address::announcement_flag::AnnouncementFlag;
 use neptune_cash::state::wallet::address::ReceivingAddress;
 use neptune_cash::state::wallet::address::SpendingKey;
 use neptune_cash::state::wallet::wallet_entropy::WalletEntropy;
-use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
+use serde::Deserialize;
+use serde::Serialize;
 
 use crate::rpc::RpcClient;
 
@@ -92,7 +95,7 @@ fn check_premine(keys: &[(SpendingKey, u64, String)], network: Network) -> Vec<D
             }
         };
 
-        for utxo in &premine_utxos {
+        for (aocl_leaf_index, utxo) in premine_utxos.iter().enumerate() {
             if utxo.lock_script_hash() != addr_lock_hash {
                 continue;
             }
@@ -120,7 +123,7 @@ fn check_premine(keys: &[(SpendingKey, u64, String)], network: Network) -> Vec<D
                 utxo_hex,
                 sender_randomness_hex: sr_hex,
                 receiver_preimage_hex: rp_hex,
-                aocl_leaf_index: None,
+                aocl_leaf_index: Some(aocl_leaf_index as u64),
             });
         }
     }
@@ -471,7 +474,6 @@ pub(crate) async fn scan_for_utxos(
         let commitment = neptune_cash::util_types::mutator_set::commit(item, sr, receiver_digest);
 
         // Find our UTXO's position in the block's additions
-        let mut found = false;
         for (i, addition) in all_additions.iter().enumerate() {
             if addition.canonical_commitment == commitment.canonical_commitment {
                 let aocl_idx = prev_aocl + i as u64;
@@ -483,11 +485,10 @@ pub(crate) async fn scan_for_utxos(
                     utxo_idx: idx,
                     abs_set,
                 });
-                found = true;
                 break;
             }
         }
-        if !found {
+        if utxo_data.aocl_leaf_index.is_none() {
             debug_log!(
                 "[SYNC] Warning: UTXO at index {} not found in block {} additions",
                 idx,
@@ -495,6 +496,14 @@ pub(crate) async fn scan_for_utxos(
             );
         }
     }
+
+    // Only track announced UTXOs that were actually present in blocks.
+    // Otherwise, someone can announce a transaction to us, in a transaction
+    // kernel announcement, without actually including it in a block.
+    discovered = discovered
+        .into_iter()
+        .filter(|u| u.aocl_leaf_index.is_some())
+        .collect();
 
     // Step 7: Run all spent-block checks in parallel
     // Uses utxoindex_blockHeightsByAbsoluteIndexSets — more accurate than
