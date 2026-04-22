@@ -371,22 +371,16 @@ async fn send_transaction(
 
     let mut all_inputs: Vec<UtxoInput> = Vec::new();
     for u in &unspent_utxos {
-        let utxo_bytes = hex::decode(&u.utxo_hex).map_err(|e| format!("Decode: {}", e))?;
-        let utxo: neptune_cash::protocol::consensus::transaction::utxo::Utxo =
-            bincode::deserialize(&utxo_bytes).map_err(|e| format!("Deserialize: {}", e))?;
-        let sr_bytes =
-            hex::decode(&u.sender_randomness_hex).map_err(|e| format!("Decode SR: {}", e))?;
-        let sr = bincode::deserialize(&sr_bytes).map_err(|e| format!("Deserialize SR: {}", e))?;
-        let rp_bytes =
-            hex::decode(&u.receiver_preimage_hex).map_err(|e| format!("Decode RP: {}", e))?;
-        let rp = bincode::deserialize(&rp_bytes).map_err(|e| format!("Deserialize RP: {}", e))?;
+        let utxo = &u.utxo;
         let amount = utxo.get_native_currency_amount();
+        let sender_randomness = u.sender_randomness;
+        let receiver_preimage = u.receiver_preimage;
         let aocl_leaf_index = u.aocl_leaf_index.ok_or("Missing AOCL leaf index")?;
 
         all_inputs.push(UtxoInput {
-            utxo,
-            sender_randomness: sr,
-            receiver_preimage: rp,
+            utxo: utxo.to_owned(),
+            sender_randomness,
+            receiver_preimage,
             aocl_leaf_index,
             amount,
             data: (*u).clone(),

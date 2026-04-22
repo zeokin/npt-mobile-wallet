@@ -15,7 +15,9 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
 
+use neptune_cash::api::export::Digest;
 use neptune_cash::api::export::KeyType;
+use neptune_cash::api::export::Utxo;
 use neptune_cash::application::config::network::Network;
 use neptune_cash::application::json_rpc::core::api::rpc::RpcApi;
 use neptune_cash::prelude::triton_vm::prelude::BFieldElement;
@@ -48,12 +50,16 @@ pub(crate) struct DiscoveredUtxo {
     pub(crate) key_type: String,
     /// Derivation index of the key that found this UTXO.
     pub(crate) key_index: u64,
-    /// Hex-encoded bincode of the Utxo (for spending).
-    pub(crate) utxo_hex: String,
-    /// Hex-encoded bincode of the sender_randomness Digest.
-    pub(crate) sender_randomness_hex: String,
-    /// Hex-encoded bincode of the receiver_preimage Digest.
-    pub(crate) receiver_preimage_hex: String,
+
+    /// The UTXO
+    pub(crate) utxo: Utxo,
+
+    /// The sender-provided randomness
+    pub(crate) sender_randomness: Digest,
+
+    /// The receiver's preimage. Only known by us.
+    pub(crate) receiver_preimage: Digest,
+
     /// AOCL leaf index — stored at discovery time for correct spending.
     pub(crate) aocl_leaf_index: Option<u64>,
 }
@@ -109,10 +115,6 @@ fn check_premine(keys: &[(SpendingKey, u64, String)], network: Network) -> Vec<D
             let amount = format_utxo_amount(utxo);
             let receiver_preimage = key.privacy_preimage();
 
-            let utxo_hex = hex::encode(bincode::serialize(utxo).unwrap_or_default());
-            let sr_hex = hex::encode(bincode::serialize(&sender_randomness).unwrap_or_default());
-            let rp_hex = hex::encode(bincode::serialize(&receiver_preimage).unwrap_or_default());
-
             found.push(DiscoveredUtxo {
                 amount,
                 block_height: 0,
@@ -120,9 +122,9 @@ fn check_premine(keys: &[(SpendingKey, u64, String)], network: Network) -> Vec<D
                 spent_in_block: None,
                 key_type: key_type.clone(),
                 key_index: *key_index,
-                utxo_hex,
-                sender_randomness_hex: sr_hex,
-                receiver_preimage_hex: rp_hex,
+                utxo: utxo.to_owned(),
+                sender_randomness,
+                receiver_preimage,
                 aocl_leaf_index: Some(aocl_leaf_index as u64),
             });
         }
@@ -306,12 +308,6 @@ pub(crate) async fn scan_for_utxos(
                         let amount = format_utxo_amount(&utxo);
                         let receiver_preimage = key.privacy_preimage();
 
-                        let utxo_hex = hex::encode(bincode::serialize(&utxo).unwrap_or_default());
-                        let sr_hex =
-                            hex::encode(bincode::serialize(&sender_randomness).unwrap_or_default());
-                        let rp_hex =
-                            hex::encode(bincode::serialize(&receiver_preimage).unwrap_or_default());
-
                         discovered.push(DiscoveredUtxo {
                             amount,
                             block_height: *height,
@@ -319,9 +315,12 @@ pub(crate) async fn scan_for_utxos(
                             spent_in_block: None,
                             key_type: key_type.clone(),
                             key_index: *key_index,
-                            utxo_hex,
-                            sender_randomness_hex: sr_hex,
-                            receiver_preimage_hex: rp_hex,
+                            utxo,
+                            sender_randomness,
+                            receiver_preimage,
+
+                            // AOCL leaf index cannot be known from
+                            // announcement, so it must be found later.
                             aocl_leaf_index: None,
                         });
                     }
@@ -442,36 +441,12 @@ pub(crate) async fn scan_for_utxos(
             Err(_) => continue,
         };
 
-        // Deserialize UTXO data to compute commitment
-        let utxo_bytes = match hex::decode(&utxo_data.utxo_hex) {
-            Ok(b) => b,
-            Err(_) => continue,
-        };
-        let utxo: neptune_cash::protocol::consensus::transaction::utxo::Utxo =
-            match bincode::deserialize(&utxo_bytes) {
-                Ok(u) => u,
-                Err(_) => continue,
-            };
-        let sr_bytes = match hex::decode(&utxo_data.sender_randomness_hex) {
-            Ok(b) => b,
-            Err(_) => continue,
-        };
-        let sr: Digest = match bincode::deserialize(&sr_bytes) {
-            Ok(d) => d,
-            Err(_) => continue,
-        };
-        let rp_bytes = match hex::decode(&utxo_data.receiver_preimage_hex) {
-            Ok(b) => b,
-            Err(_) => continue,
-        };
-        let rp: Digest = match bincode::deserialize(&rp_bytes) {
-            Ok(d) => d,
-            Err(_) => continue,
-        };
-
-        let item = neptune_cash::prelude::triton_vm::prelude::Tip5::hash(&utxo);
-        let receiver_digest = rp.hash();
-        let commitment = neptune_cash::util_types::mutator_set::commit(item, sr, receiver_digest);
+        let item = neptune_cash::prelude::triton_vm::prelude::Tip5::hash(&utxo_data.utxo);
+        let receiver_preimage = utxo_data.receiver_preimage;
+        let receiver_digest = receiver_preimage.hash();
+        let sender_randomness = utxo_data.sender_randomness;
+        let commitment =
+            neptune_cash::util_types::mutator_set::commit(item, sender_randomness, receiver_digest);
 
         // Find our UTXO's position in the block's additions
         for (i, addition) in all_additions.iter().enumerate() {
@@ -480,7 +455,8 @@ pub(crate) async fn scan_for_utxos(
                 utxo_data.aocl_leaf_index = Some(aocl_idx);
 
                 // Prepare spent-block check (will run in parallel)
-                let abs_set = AbsoluteIndexSet::compute(item, sr, rp, aocl_idx);
+                let abs_set =
+                    AbsoluteIndexSet::compute(item, sender_randomness, receiver_preimage, aocl_idx);
                 spent_checks.push(SpentCheck {
                     utxo_idx: idx,
                     abs_set,
