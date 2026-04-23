@@ -12,7 +12,13 @@
 //! Performance: kernel fetches, wallet block fetches, and bloom filter checks
 //! are all parallelized. Wallet blocks are cached to avoid duplicate fetches.
 
+use std::collections::HashMap;
+use std::collections::HashSet;
+
+use neptune_cash::api::export::Digest;
 use neptune_cash::api::export::KeyType;
+use neptune_cash::api::export::Timestamp;
+use neptune_cash::api::export::Utxo;
 use neptune_cash::application::config::network::Network;
 use neptune_cash::application::json_rpc::core::api::rpc::RpcApi;
 use neptune_cash::prelude::triton_vm::prelude::BFieldElement;
@@ -23,8 +29,8 @@ use neptune_cash::state::wallet::address::announcement_flag::AnnouncementFlag;
 use neptune_cash::state::wallet::address::ReceivingAddress;
 use neptune_cash::state::wallet::address::SpendingKey;
 use neptune_cash::state::wallet::wallet_entropy::WalletEntropy;
-use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
+use serde::Deserialize;
+use serde::Serialize;
 
 use crate::rpc::RpcClient;
 
@@ -45,12 +51,16 @@ pub(crate) struct DiscoveredUtxo {
     pub(crate) key_type: String,
     /// Derivation index of the key that found this UTXO.
     pub(crate) key_index: u64,
-    /// Hex-encoded bincode of the Utxo (for spending).
-    pub(crate) utxo_hex: String,
-    /// Hex-encoded bincode of the sender_randomness Digest.
-    pub(crate) sender_randomness_hex: String,
-    /// Hex-encoded bincode of the receiver_preimage Digest.
-    pub(crate) receiver_preimage_hex: String,
+
+    /// The UTXO
+    pub(crate) utxo: Utxo,
+
+    /// The sender-provided randomness
+    pub(crate) sender_randomness: Digest,
+
+    /// The receiver's preimage. Only known by us.
+    pub(crate) receiver_preimage: Digest,
+
     /// AOCL leaf index — stored at discovery time for correct spending.
     pub(crate) aocl_leaf_index: Option<u64>,
 }
@@ -92,7 +102,7 @@ fn check_premine(keys: &[(SpendingKey, u64, String)], network: Network) -> Vec<D
             }
         };
 
-        for utxo in &premine_utxos {
+        for (aocl_leaf_index, utxo) in premine_utxos.iter().enumerate() {
             if utxo.lock_script_hash() != addr_lock_hash {
                 continue;
             }
@@ -106,10 +116,6 @@ fn check_premine(keys: &[(SpendingKey, u64, String)], network: Network) -> Vec<D
             let amount = format_utxo_amount(utxo);
             let receiver_preimage = key.privacy_preimage();
 
-            let utxo_hex = hex::encode(bincode::serialize(utxo).unwrap_or_default());
-            let sr_hex = hex::encode(bincode::serialize(&sender_randomness).unwrap_or_default());
-            let rp_hex = hex::encode(bincode::serialize(&receiver_preimage).unwrap_or_default());
-
             found.push(DiscoveredUtxo {
                 amount,
                 block_height: 0,
@@ -117,10 +123,10 @@ fn check_premine(keys: &[(SpendingKey, u64, String)], network: Network) -> Vec<D
                 spent_in_block: None,
                 key_type: key_type.clone(),
                 key_index: *key_index,
-                utxo_hex,
-                sender_randomness_hex: sr_hex,
-                receiver_preimage_hex: rp_hex,
-                aocl_leaf_index: None,
+                utxo: utxo.to_owned(),
+                sender_randomness,
+                receiver_preimage,
+                aocl_leaf_index: Some(aocl_leaf_index as u64),
             });
         }
     }
@@ -303,12 +309,6 @@ pub(crate) async fn scan_for_utxos(
                         let amount = format_utxo_amount(&utxo);
                         let receiver_preimage = key.privacy_preimage();
 
-                        let utxo_hex = hex::encode(bincode::serialize(&utxo).unwrap_or_default());
-                        let sr_hex =
-                            hex::encode(bincode::serialize(&sender_randomness).unwrap_or_default());
-                        let rp_hex =
-                            hex::encode(bincode::serialize(&receiver_preimage).unwrap_or_default());
-
                         discovered.push(DiscoveredUtxo {
                             amount,
                             block_height: *height,
@@ -316,9 +316,12 @@ pub(crate) async fn scan_for_utxos(
                             spent_in_block: None,
                             key_type: key_type.clone(),
                             key_index: *key_index,
-                            utxo_hex,
-                            sender_randomness_hex: sr_hex,
-                            receiver_preimage_hex: rp_hex,
+                            utxo,
+                            sender_randomness,
+                            receiver_preimage,
+
+                            // AOCL leaf index cannot be known from
+                            // announcement, so it must be found later.
                             aocl_leaf_index: None,
                         });
                     }
@@ -439,55 +442,30 @@ pub(crate) async fn scan_for_utxos(
             Err(_) => continue,
         };
 
-        // Deserialize UTXO data to compute commitment
-        let utxo_bytes = match hex::decode(&utxo_data.utxo_hex) {
-            Ok(b) => b,
-            Err(_) => continue,
-        };
-        let utxo: neptune_cash::protocol::consensus::transaction::utxo::Utxo =
-            match bincode::deserialize(&utxo_bytes) {
-                Ok(u) => u,
-                Err(_) => continue,
-            };
-        let sr_bytes = match hex::decode(&utxo_data.sender_randomness_hex) {
-            Ok(b) => b,
-            Err(_) => continue,
-        };
-        let sr: Digest = match bincode::deserialize(&sr_bytes) {
-            Ok(d) => d,
-            Err(_) => continue,
-        };
-        let rp_bytes = match hex::decode(&utxo_data.receiver_preimage_hex) {
-            Ok(b) => b,
-            Err(_) => continue,
-        };
-        let rp: Digest = match bincode::deserialize(&rp_bytes) {
-            Ok(d) => d,
-            Err(_) => continue,
-        };
-
-        let item = neptune_cash::prelude::triton_vm::prelude::Tip5::hash(&utxo);
-        let receiver_digest = rp.hash();
-        let commitment = neptune_cash::util_types::mutator_set::commit(item, sr, receiver_digest);
+        let item = neptune_cash::prelude::triton_vm::prelude::Tip5::hash(&utxo_data.utxo);
+        let receiver_preimage = utxo_data.receiver_preimage;
+        let receiver_digest = receiver_preimage.hash();
+        let sender_randomness = utxo_data.sender_randomness;
+        let commitment =
+            neptune_cash::util_types::mutator_set::commit(item, sender_randomness, receiver_digest);
 
         // Find our UTXO's position in the block's additions
-        let mut found = false;
         for (i, addition) in all_additions.iter().enumerate() {
             if addition.canonical_commitment == commitment.canonical_commitment {
                 let aocl_idx = prev_aocl + i as u64;
                 utxo_data.aocl_leaf_index = Some(aocl_idx);
 
                 // Prepare spent-block check (will run in parallel)
-                let abs_set = AbsoluteIndexSet::compute(item, sr, rp, aocl_idx);
+                let abs_set =
+                    AbsoluteIndexSet::compute(item, sender_randomness, receiver_preimage, aocl_idx);
                 spent_checks.push(SpentCheck {
                     utxo_idx: idx,
                     abs_set,
                 });
-                found = true;
                 break;
             }
         }
-        if !found {
+        if utxo_data.aocl_leaf_index.is_none() {
             debug_log!(
                 "[SYNC] Warning: UTXO at index {} not found in block {} additions",
                 idx,
@@ -495,6 +473,23 @@ pub(crate) async fn scan_for_utxos(
             );
         }
     }
+
+    // Only track announced UTXOs that were actually present in blocks.
+    // Otherwise, someone can announce a transaction to us, in a transaction
+    // kernel announcement, without actually including it in a block.
+    discovered = discovered
+        .into_iter()
+        .filter(|u| u.aocl_leaf_index.is_some())
+        .collect();
+
+    // Only track UTXOs where we know we can unlock all typescripts. Otherwise,
+    // the UTXO may carry an unresolvable typescript, or the UTXO may be time-
+    // locked.
+    let now = Timestamp::now();
+    discovered = discovered
+        .into_iter()
+        .filter(|u| u.utxo.can_spend_at(now))
+        .collect();
 
     // Step 7: Run all spent-block checks in parallel
     // Uses utxoindex_blockHeightsByAbsoluteIndexSets — more accurate than
@@ -600,4 +595,45 @@ fn parse_announcement_message(val: &serde_json::Value) -> Option<Vec<BFieldEleme
 fn format_utxo_amount(utxo: &neptune_cash::protocol::consensus::transaction::utxo::Utxo) -> String {
     let amount = utxo.get_native_currency_amount();
     format!("{}", amount)
+}
+
+#[cfg(test)]
+mod tests {
+    use itertools::Itertools;
+    use neptune_cash::api::export::NativeCurrencyAmount;
+
+    use super::*;
+    use crate::keys::wallet_entropy_from_phrase;
+
+    #[test]
+    fn can_idenfity_premine_utxo() {
+        let network = Network::Main;
+        let devnet_mnemonic = vec![
+            "margin", "quality", "divorce", "tuition", "notable", "squirrel", "park", "jar", "end",
+            "beauty", "attend", "cliff", "media", "letter", "private", "decline", "absurd",
+            "uniform",
+        ]
+        .into_iter()
+        .map(|x| x.to_string())
+        .collect_vec();
+        let entropy = wallet_entropy_from_phrase(&devnet_mnemonic).unwrap();
+        let devnet_key: SpendingKey = entropy.nth_generation_spending_key(0).into();
+        let premine_utxos = check_premine(&[(devnet_key, 0, "generation".to_owned())], network);
+        assert_eq!(1, premine_utxos.len(), "Should find 1 premine UTXO");
+        let premine_utxo = &premine_utxos[0];
+        assert_eq!(
+            NativeCurrencyAmount::coins(20),
+            premine_utxo.utxo.get_native_currency_amount(),
+            "Premine UTXO should have correct amount"
+        );
+        assert_eq!(
+            0, premine_utxo.block_height,
+            "Premine UTXO should be at block height 0"
+        );
+        assert_eq!(
+            0,
+            premine_utxo.aocl_leaf_index.unwrap(),
+            "Devnet's premine UTXO should be at AOCL index 0"
+        );
+    }
 }

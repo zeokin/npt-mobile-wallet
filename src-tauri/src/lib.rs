@@ -17,12 +17,16 @@ mod seed;
 mod sync;
 mod transaction;
 
-use rpc::RpcClient;
-use serde::Serialize;
 use std::sync::Mutex;
 use std::time::Instant;
-use tauri::{Manager, State};
+
+use rpc::RpcClient;
+use serde::Serialize;
+use tauri::Manager;
+use tauri::State;
 use zeroize::Zeroize;
+
+use crate::seed::is_v2_format;
 
 /// Session auto-lock after 3 minutes of inactivity.
 const SESSION_TIMEOUT_SECS: u64 = 180;
@@ -162,7 +166,7 @@ fn unlock_wallet(
             *state.lockout_until.lock().unwrap() = None;
 
             // Auto-migrate v1 (SHA-256) seed files to v2 (Argon2id) on unlock
-            if !encrypted.starts_with(b"NPT\x00") {
+            if !is_v2_format(&encrypted) {
                 seed::migrate_v1_to_v2(&path, &entropy, &pin)?;
             }
 
@@ -340,13 +344,13 @@ async fn send_transaction(
     use neptune_cash::prelude::triton_vm::prelude::Tip5;
     use neptune_cash::prelude::twenty_first::util_types::mmr::mmr_trait::Mmr;
     use neptune_cash::protocol::consensus::block::block_height::BlockHeight;
-    use neptune_cash::protocol::consensus::block::block_kernel::BlockKernel;
-    use neptune_cash::protocol::proof_abstractions::mast_hash::MastHash;
     use neptune_cash::protocol::proof_abstractions::timestamp::Timestamp;
     use neptune_cash::state::wallet::transaction_output::TxOutput;
     use neptune_cash::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
     use neptune_cash::util_types::mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
-    use num_traits::{CheckedAdd, CheckedSub, Zero};
+    use num_traits::CheckedAdd;
+    use num_traits::CheckedSub;
+    use num_traits::Zero;
 
     let total_needed = amount_val
         .checked_add(&fee_val)
@@ -360,26 +364,24 @@ async fn send_transaction(
         utxo: neptune_cash::protocol::consensus::transaction::utxo::Utxo,
         sender_randomness: neptune_cash::prelude::triton_vm::prelude::Digest,
         receiver_preimage: neptune_cash::prelude::triton_vm::prelude::Digest,
+        aocl_leaf_index: u64,
         amount: neptune_cash::api::export::NativeCurrencyAmount,
         data: sync::DiscoveredUtxo,
     }
 
     let mut all_inputs: Vec<UtxoInput> = Vec::new();
     for u in &unspent_utxos {
-        let utxo_bytes = hex::decode(&u.utxo_hex).map_err(|e| format!("Decode: {}", e))?;
-        let utxo: neptune_cash::protocol::consensus::transaction::utxo::Utxo =
-            bincode::deserialize(&utxo_bytes).map_err(|e| format!("Deserialize: {}", e))?;
-        let sr_bytes =
-            hex::decode(&u.sender_randomness_hex).map_err(|e| format!("Decode SR: {}", e))?;
-        let sr = bincode::deserialize(&sr_bytes).map_err(|e| format!("Deserialize SR: {}", e))?;
-        let rp_bytes =
-            hex::decode(&u.receiver_preimage_hex).map_err(|e| format!("Decode RP: {}", e))?;
-        let rp = bincode::deserialize(&rp_bytes).map_err(|e| format!("Deserialize RP: {}", e))?;
+        let utxo = &u.utxo;
         let amount = utxo.get_native_currency_amount();
+        let sender_randomness = u.sender_randomness;
+        let receiver_preimage = u.receiver_preimage;
+        let aocl_leaf_index = u.aocl_leaf_index.ok_or("Missing AOCL leaf index")?;
+
         all_inputs.push(UtxoInput {
-            utxo,
-            sender_randomness: sr,
-            receiver_preimage: rp,
+            utxo: utxo.to_owned(),
+            sender_randomness,
+            receiver_preimage,
+            aocl_leaf_index,
             amount,
             data: (*u).clone(),
         });
@@ -435,34 +437,9 @@ async fn send_transaction(
     let tip_height = u64::from(tip_resp.block.kernel.header.height);
     debug_log!("[SEND] Chain tip at height {}", tip_height);
 
-    // Helper: fetch one block from the supporter and return its kernel + hash.
-    async fn fetch_block(
-        rpc: &RpcClient,
-        height: u64,
-    ) -> Result<
-        (
-            BlockKernel,
-            neptune_cash::prelude::triton_vm::prelude::Digest,
-        ),
-        String,
-    > {
-        use neptune_cash::application::json_rpc::core::api::rpc::RpcApi;
-        use neptune_cash::protocol::consensus::block::block_height::BlockHeight;
-        let bh = BlockHeight::from(height);
-        let resp = rpc
-            .get_blocks(bh, bh)
-            .await
-            .map_err(|e| format!("get_blocks: {}", e))?;
-        let block = resp.blocks.into_iter().next().ok_or("No block")?;
-        let hash = block.hash();
-        let kernel: BlockKernel = block.kernel.into();
-        Ok((kernel, hash))
-    }
-
     // Step 4-7: For EACH selected UTXO: compute AOCL index, get membership proof, unlock
     debug_log!("[SEND] Steps 4-7: Processing {} inputs...", selected.len());
     let mut all_abs_index_sets = Vec::new();
-    let mut all_aocl_indices = Vec::new();
 
     // Compute AOCL index and AbsoluteIndexSet for each input
     for (idx, input) in selected.iter().enumerate() {
@@ -474,62 +451,10 @@ async fn send_transaction(
             input.amount
         );
 
-        // Get previous block AOCL count.
-        // For genesis block (height 0): AOCL starts empty, so prev_aocl = 0.
-        let prev_aocl = if block_height == 0 {
-            0u64
-        } else {
-            let (prev_kernel, prev_hash) = fetch_block(&rpc, block_height - 1).await?;
-            let prev_gf = prev_kernel
-                .guesser_fee_addition_records(prev_hash)
-                .map_err(|e| format!("Guesser fees: {}", e))?;
-            let prev_msa = prev_kernel.body.mutator_set_accumulator_after(prev_gf);
-            prev_msa.aocl.num_leafs()
-        };
-
-        // Get block additions.
-        // For genesis block (height 0): fetch locally since supporter may not serve it via RPC.
-        let all_additions = if block_height == 0 {
-            use neptune_cash::application::config::network::Network;
-            use neptune_cash::protocol::consensus::block::Block;
-            let genesis = Block::genesis(Network::Main);
-            let genesis_hash = genesis.hash();
-            genesis
-                .kernel
-                .all_addition_records(genesis_hash)
-                .map_err(|e| format!("Genesis addition records: {}", e))?
-        } else {
-            let (kernel, hash) = fetch_block(&rpc, block_height).await?;
-            kernel
-                .all_addition_records(hash)
-                .map_err(|e| format!("Addition records: {}", e))?
-        };
-
         // Find our commitment
         let utxo_hash = Tip5::hash(&input.utxo);
-        let receiver_digest = input.receiver_preimage.hash();
-        let commitment = neptune_cash::util_types::mutator_set::commit(
-            utxo_hash,
-            input.sender_randomness,
-            receiver_digest,
-        );
-
-        let position = all_additions
-            .iter()
-            .position(|a| a.canonical_commitment == commitment.canonical_commitment)
-            .ok_or(format!(
-                "UTXO not found in block {} additions",
-                block_height
-            ))?;
-
-        let aocl_idx = prev_aocl + position as u64;
-        debug_log!(
-            "[SEND] Input {}: AOCL index {} (prev {} + pos {})",
-            idx,
-            aocl_idx,
-            prev_aocl,
-            position
-        );
+        let aocl_idx = input.aocl_leaf_index;
+        debug_log!("[SEND] Input {}: AOCL index {}", idx, aocl_idx,);
 
         let abs_set = AbsoluteIndexSet::compute(
             utxo_hash,
@@ -538,7 +463,6 @@ async fn send_transaction(
             aocl_idx,
         );
         all_abs_index_sets.push(abs_set);
-        all_aocl_indices.push(aocl_idx);
     }
 
     // Batch restore membership proofs for ALL inputs
@@ -566,7 +490,7 @@ async fn send_transaction(
     {
         let membership_proof = proof_data
             .extract_ms_membership_proof(
-                all_aocl_indices[idx],
+                input.aocl_leaf_index,
                 input.sender_randomness,
                 input.receiver_preimage,
             )
@@ -660,7 +584,7 @@ async fn send_transaction(
                     "Membership proof validation failed for input {}. \
                      AOCL index: {}, MSA AOCL leafs: {}.",
                     idx,
-                    all_aocl_indices[idx],
+                    input.aocl_leaf_index,
                     msa.aocl.num_leafs()
                 ));
             }
