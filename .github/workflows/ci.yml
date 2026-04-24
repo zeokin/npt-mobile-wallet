@@ -1,0 +1,73 @@
+name: CI
+
+# Runs on every PR and every push to main/security branches.
+# Verifies the codebase compiles cleanly for Android, passes type-checks,
+# and is properly formatted — before anything reaches a release.
+
+on:
+  push:
+    branches: [main, security]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Build + lint (Android)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Setup JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: 'aarch64-linux-android,x86_64-linux-android'
+          components: 'rustfmt'
+
+      - name: Cache Rust build
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: './src-tauri -> target'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android NDK
+        run: echo "y" | sdkmanager "ndk;27.0.12077973" > /dev/null
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: Check Rust formatting
+        working-directory: src-tauri
+        run: cargo fmt --check
+
+      - name: Type-check frontend
+        run: npx tsc --noEmit
+
+      - name: Build Android APK (unsigned)
+        env:
+          NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/27.0.12077973
+        run: npx @tauri-apps/cli android build --target aarch64 --target x86_64
+
+      - name: Upload unsigned APK as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: npt-wallet-unsigned-${{ github.sha }}
+          path: src-tauri/gen/android/app/build/outputs/apk/universal/release/app-universal-release-unsigned.apk
+          retention-days: 7
