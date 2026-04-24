@@ -63,6 +63,15 @@ jobs:
         with:
           workspaces: './src-tauri -> target'
 
+      # The generated Android Gradle project invokes `cargo tauri` as a
+      # subcommand when building per-ABI Rust libs. That requires the
+      # tauri-cli Cargo subcommand to be on PATH — the npm package alone
+      # is not enough. Install a prebuilt binary (fast).
+      - name: Install cargo-tauri CLI
+        uses: taiki-e/install-action@v2
+        with:
+          tool: tauri-cli@2
+
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
