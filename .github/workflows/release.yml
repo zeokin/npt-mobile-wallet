@@ -34,7 +34,11 @@ jobs:
       # `codegen-units = 1` + LTO which spikes memory during linking.
       # Add swap so the build doesn't OOM.
       - name: Add swap space
+        # GitHub runners ship with /swapfile already mounted (4 GB).
+        # Disable it and replace with a 10 GB one so LTO linking has room.
         run: |
+          sudo swapoff /swapfile || true
+          sudo rm -f /swapfile
           sudo fallocate -l 10G /swapfile
           sudo chmod 600 /swapfile
           sudo mkswap /swapfile
