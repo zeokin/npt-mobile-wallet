@@ -19,12 +19,27 @@ jobs:
   android-release:
     name: Build + sign Android APK
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
     permissions:
       contents: write  # needed to create the GitHub Release
+    # neptune-cash has very deep macro expansions (the RpcApi blanket impl)
+    # that exceed rustc's default thread stack on GitHub runners. Bump it.
+    env:
+      RUST_MIN_STACK: 16777216
 
     steps:
       - uses: actions/checkout@v4
+
+      # GitHub runners have only 7 GB RAM; our release profile uses
+      # `codegen-units = 1` + LTO which spikes memory during linking.
+      # Add swap so the build doesn't OOM.
+      - name: Add swap space
+        run: |
+          sudo fallocate -l 10G /swapfile
+          sudo chmod 600 /swapfile
+          sudo mkswap /swapfile
+          sudo swapon /swapfile
+          free -h
 
       - name: Setup Node
         uses: actions/setup-node@v4
