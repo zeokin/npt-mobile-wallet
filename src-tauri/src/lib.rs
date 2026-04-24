@@ -52,6 +52,12 @@ struct AppState {
     /// True while a submitted transaction is waiting to be mined.
     /// Blocks additional sends to prevent double-spending.
     has_pending_tx: Mutex<bool>,
+    /// True while a long-running authenticated operation is in progress
+    /// (currently: send_transaction, whose proof generation can take several
+    /// minutes). While set, `check_session` skips the idle-timeout check so
+    /// the UI isn't kicked to the unlock screen mid-send. The flag is always
+    /// cleared on return from the operation.
+    work_in_progress: Mutex<bool>,
 }
 
 #[derive(Serialize)]
@@ -71,6 +77,13 @@ fn check_session(state: &State<'_, AppState>) -> Result<(), String> {
     if !unlocked {
         return Err("Wallet is locked".to_string());
     }
+    // A long-running authenticated operation (e.g. STARK proof generation in
+    // send_transaction) may run for several minutes without user interaction.
+    // Treat the session as valid during that window so the UI isn't kicked
+    // to the unlock screen mid-send.
+    if *state.work_in_progress.lock().unwrap() {
+        return Ok(());
+    }
     if let Some(last) = *state.last_activity.lock().unwrap() {
         if last.elapsed().as_secs() > SESSION_TIMEOUT_SECS {
             *state.wallet_unlocked.lock().unwrap() = false;
@@ -88,6 +101,25 @@ fn set_cached_pin(state: &State<'_, AppState>, new_pin: Option<String>) {
         old.zeroize();
     }
     *guard = new_pin;
+}
+
+/// RAII guard: sets `work_in_progress = true` on creation, clears it on drop.
+/// Guarantees the flag is cleared on every return path, including `?`-returns.
+struct WorkInProgressGuard<'a> {
+    flag: &'a Mutex<bool>,
+}
+
+impl<'a> WorkInProgressGuard<'a> {
+    fn new(flag: &'a Mutex<bool>) -> Self {
+        *flag.lock().unwrap() = true;
+        Self { flag }
+    }
+}
+
+impl<'a> Drop for WorkInProgressGuard<'a> {
+    fn drop(&mut self) {
+        *self.flag.lock().unwrap() = false;
+    }
 }
 
 // ── Seed / Wallet Commands ───────────────────────────────────
@@ -285,6 +317,11 @@ async fn send_transaction(
 ) -> Result<String, String> {
     check_session(&state)?;
     touch_session(&state);
+
+    // Mark this as a long-running operation so the session timer doesn't
+    // expire during proof generation (which can take several minutes).
+    // The guard is dropped automatically on every return path.
+    let _work_guard = WorkInProgressGuard::new(&state.work_in_progress);
 
     // Block sending while a previous transaction is pending (prevents double-spend)
     // Check both in-memory flag and disk file (handles app restart)
@@ -896,6 +933,7 @@ pub fn run() {
             failed_pin_attempts: Mutex::new(0),
             lockout_until: Mutex::new(None),
             has_pending_tx: Mutex::new(false),
+            work_in_progress: Mutex::new(false),
         })
         .invoke_handler(tauri::generate_handler![
             // Wallet

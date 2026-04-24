@@ -61,7 +61,9 @@ export default function SeedImportScreen() {
       await importWallet(wordInputs.join(" "), pin);
       useWalletStore.getState().reset();
       toast.success("Wallet imported!");
-      navigate("/wallet", { replace: true, state: { freshUnlock: true } });
+      // Use `freshImport` instead of `freshUnlock` so the initial sync stays
+      // silent — newly-discovered historical UTXOs are not "just received".
+      navigate("/wallet", { replace: true, state: { freshImport: true } });
     } catch (e) {
       toast.error(String(e));
     } finally {

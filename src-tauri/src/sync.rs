@@ -474,27 +474,15 @@ pub(crate) async fn scan_for_utxos(
         }
     }
 
-    // Only track announced UTXOs that were actually present in blocks.
-    // Otherwise, someone can announce a transaction to us, in a transaction
-    // kernel announcement, without actually including it in a block.
-    discovered = discovered
-        .into_iter()
-        .filter(|u| u.aocl_leaf_index.is_some())
-        .collect();
-
-    // Only track UTXOs where we know we can unlock all typescripts. Otherwise,
-    // the UTXO may carry an unresolvable typescript, or the UTXO may be time-
-    // locked.
-    let now = Timestamp::now();
-    discovered = discovered
-        .into_iter()
-        .filter(|u| u.utxo.can_spend_at(now))
-        .collect();
-
     // Step 7: Run all spent-block checks in parallel
     // Uses utxoindex_blockHeightsByAbsoluteIndexSets — more accurate than
     // bloom filter (no false positives) and also tells us WHERE the UTXO
     // was spent, not just whether it was spent.
+    //
+    // Note: we run spent-checks BEFORE the filters below, because the
+    // `spent_checks` entries carry `utxo_idx` values that reference positions
+    // in the current `discovered` Vec. Filtering first would shift indices
+    // and cause either wrong UTXOs to be marked spent or out-of-bounds panics.
     debug_log!(
         "[SYNC] Running {} spent-block checks in parallel...",
         spent_checks.len()
@@ -519,10 +507,33 @@ pub(crate) async fn scan_for_utxos(
         if let Ok(resp) = result {
             // Empty → unspent; non-empty → first (only) entry is the spending block
             let maybe_height = resp.block_heights.into_iter().next().map(u64::from);
-            discovered[idx].spent_in_block = maybe_height;
-            discovered[idx].likely_spent = maybe_height.is_some();
+            if let Some(u) = discovered.get_mut(idx) {
+                u.spent_in_block = maybe_height;
+                u.likely_spent = maybe_height.is_some();
+            }
         }
     }
+
+    // Now safe to filter — Step 7 has already populated spent_in_block using
+    // the original indices.
+    //
+    // Filter 1: only track announced UTXOs that were actually present in
+    // blocks. Otherwise, someone can announce a transaction to us in a
+    // transaction kernel announcement without actually including it in a
+    // block.
+    discovered = discovered
+        .into_iter()
+        .filter(|u| u.aocl_leaf_index.is_some())
+        .collect();
+
+    // Filter 2: only track UTXOs where we know we can unlock all typescripts.
+    // Otherwise, the UTXO may carry an unresolvable typescript, or the UTXO
+    // may be time-locked.
+    let now = Timestamp::now();
+    discovered = discovered
+        .into_iter()
+        .filter(|u| u.utxo.can_spend_at(now))
+        .collect();
 
     // Calculate balance summary (only unspent UTXOs)
     let unspent: Vec<&DiscoveredUtxo> = discovered.iter().filter(|u| !u.likely_spent).collect();

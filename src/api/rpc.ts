@@ -35,9 +35,11 @@ export interface DiscoveredUtxo {
   spent_in_block: number | null;
   key_type: string;
   key_index: number;
-  utxo_hex: string;
-  sender_randomness_hex: string;
-  receiver_preimage_hex: string;
+  // Opaque to the frontend — we just pass these back to the backend if needed.
+  // The frontend should never parse these; they're typed Utxo/Digest JSON blobs.
+  utxo: unknown;
+  sender_randomness: unknown;
+  receiver_preimage: unknown;
   aocl_leaf_index: number | null;
 }
 export const syncWallet = (pin: string | null, numKeys?: number) =>

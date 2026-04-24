@@ -40,7 +40,14 @@ function PendingBubble({ amount }: { amount: string }) {
 export default function WalletScreen() {
   const navigate = useNavigate();
   const location = useLocation();
+  // Two flavors of "fresh start" that trigger an auto-sync on mount:
+  //   - freshImport: from import/create flows. Store is empty, so ALL
+  //     discovered UTXOs are "new" to the local store. We sync silently.
+  //   - freshUnlock: from unlock flow. Store is persisted with previous
+  //     session's UTXOs, so only truly-new UTXOs will trigger the toast.
+  const freshImport = (location.state as any)?.freshImport === true;
   const freshUnlock = (location.state as any)?.freshUnlock === true;
+  const freshStart = freshImport || freshUnlock;
 
   const { network, connected, setConnected } = useSettingsStore();
   const { utxos, outgoingTxs, setBalance, setUtxos, myAddress, setMyAddress } = useWalletStore();
@@ -126,9 +133,11 @@ export default function WalletScreen() {
     try {
       const result = await syncWallet(null, 5);
 
-      // Snapshot existing UTXOs BEFORE updating the store
+      // Snapshot existing UTXOs BEFORE updating the store.
+      // We key on aocl_leaf_index: every canonical UTXO has a unique AOCL
+      // position, and sync.rs filters out any UTXO without one.
       const existingIds = new Set(
-        useWalletStore.getState().utxos.map((u: any) => u.utxo_hex)
+        useWalletStore.getState().utxos.map((u: any) => u.aocl_leaf_index)
       );
 
       setBalance(result.balance);
@@ -138,7 +147,7 @@ export default function WalletScreen() {
       );
 
       // Only toast for genuinely new UTXOs
-      const newUtxos = result.utxos.filter((u: any) => !existingIds.has(u.utxo_hex));
+      const newUtxos = result.utxos.filter((u: any) => !existingIds.has(u.aocl_leaf_index));
       if (showToast && newUtxos.length > 0) {
         toast.success(`Received ${newUtxos.length} new UTXO(s)!`);
       }
@@ -154,7 +163,7 @@ export default function WalletScreen() {
   }, [setBalance, setUtxos, resolvePendingTx]);
 
   useEffect(() => {
-    if (!freshUnlock) {
+    if (!freshStart) {
       hasPendingTx().then(setPendingBlocked).catch(() => { });
       return;
     }
@@ -176,7 +185,12 @@ export default function WalletScreen() {
       }
 
       if (!cancelled) {
-        await doSync(false);
+        // Show the "Received N new UTXO(s)!" toast on unlock (store is
+        // persisted, so only genuinely new UTXOs will trigger it), but
+        // stay silent on import/create (everything is "new" to the fresh
+        // local store — it would be misleading to toast for historical
+        // funds).
+        await doSync(freshUnlock);
       }
     };
     init();
