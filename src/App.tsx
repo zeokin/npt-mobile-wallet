@@ -1,4 +1,5 @@
-import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { useEffect } from "react";
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from "react-router-dom";
 import { Toaster } from "sonner";
 import { useSessionGuard } from "./hooks/useSessionGuard";
 import SeedSetupScreen from "./screens/SeedSetupScreen";
@@ -10,8 +11,25 @@ import SendScreen from "./screens/SendScreen";
 import HistoryScreen from "./screens/HistoryScreen";
 import SettingsScreen from "./screens/SettingsScreen";
 
+function useRouteBackground() {
+  const { pathname } = useLocation();
+
+  useEffect(() => {
+    const background =
+      pathname === "/" || pathname === "/unlock"
+        ? "var(--npt-blue)"
+        : pathname === "/wallet" || pathname === "/history" || pathname === "/settings"
+          ? "var(--npt-bg)"
+          : "var(--npt-logo-bg)";
+
+    document.documentElement.style.setProperty("--app-bg", background);
+    document.body.style.backgroundColor = background;
+  }, [pathname]);
+}
+
 function AppRoutes() {
   useSessionGuard();
+  useRouteBackground();
 
   return (
     <Routes>
@@ -31,7 +49,10 @@ function AppRoutes() {
 export default function App() {
   return (
     <BrowserRouter>
-      <div className="h-full w-full bg-[var(--npt-bg)] text-[var(--npt-text)]">
+      <div
+        className="h-full w-full text-[var(--npt-text)]"
+        style={{ backgroundColor: "var(--app-bg, var(--npt-bg))" }}
+      >
         <AppRoutes />
         <Toaster
           position="top-center"
