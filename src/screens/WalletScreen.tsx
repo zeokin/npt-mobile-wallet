@@ -230,11 +230,11 @@ export default function WalletScreen() {
     : "Generating...";
 
   return (
-    <div className="flex flex-col h-full bg-[var(--npt-blue)] safe-top">
+    <div className="flex flex-col h-full min-h-0 bg-[var(--npt-blue)] safe-top">
       <div className="flex items-center px-2 py-2">
         <h1 className="flex-1 text-center text-lg text-white font-semibold">My Wallet</h1>
       </div>
-      <div className="animate-fade-in h-full flex flex-col justify-between ">
+      <div className="animate-fade-in flex-1 min-h-0 flex flex-col overflow-hidden">
         {/* Balance area */}
         <div className="h-8/24  flex flex-col items-center justify-center px-2">
           <div className="text-4xl font-bold text-white tracking-tight">

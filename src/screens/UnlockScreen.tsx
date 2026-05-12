@@ -96,9 +96,9 @@ export default function UnlockScreen() {
   };
 
   return (
-    <div className="flex flex-col h-full bg-[var(--npt-blue)] safe-top safe-bottom">
+    <div className="relative flex flex-col h-full bg-[var(--npt-blue)] safe-top">
       {/* Centered content */}
-      <div className="h-5/6 flex-1 flex flex-col items-center justify-center gap-2">
+      <div className="flex-1 min-h-0 flex flex-col items-center justify-center gap-2 pb-28">
         <NeptuneLogo size={90} />
         <p className="text-2xl text-white/60 font-light">Welcome back</p>
 
@@ -107,6 +107,7 @@ export default function UnlockScreen() {
           <div className="border-b border-t border-white/90 flex items-center">
             <input
               type={showPin ? "text" : "password"}
+              autoComplete="current-password"
               placeholder={locked ? "" : "Enter your password"}
               value={pin}
               onChange={(e) => !locked && setPin(e.target.value)}
@@ -115,10 +116,13 @@ export default function UnlockScreen() {
               className={`flex-1 bg-transparent text-white text-center text-lg py-1 placeholder:text-white/40 focus:outline-none ${locked ? "opacity-40" : ""}`}
             />
             <button
+              type="button"
+              aria-label={showPin ? "Hide password" : "Show password"}
+              aria-pressed={showPin}
               onClick={() => setShowPin(!showPin)}
               className="p-2 text-white/50 hover:text-white/80 transition-colors"
             >
-              {showPin ? <EyeOff size={20} /> : <Eye size={20} />}
+              {showPin ? <Eye size={20} /> : <EyeOff size={20} />}
             </button>
           </div>
           {locked ? (
@@ -132,7 +136,7 @@ export default function UnlockScreen() {
       </div>
 
       {/* Bottom actions */}
-      <div className="h-1/6 flex flex-col gap-2">
+      <div className="absolute left-0 right-0 bottom-0 flex flex-col gap-2 safe-bottom-actions">
         <div className="flex justify-center"><button
           onClick={handleUnlock}
           disabled={loading || locked}

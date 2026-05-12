@@ -900,6 +900,57 @@ fn get_rpc(state: &State<'_, AppState>) -> Result<RpcClient, String> {
         .ok_or_else(|| "Not connected to supporter".to_string())
 }
 
+#[cfg(target_os = "ios")]
+fn extend_ios_webview_into_safe_area(app: &tauri::App) -> tauri::Result<()> {
+    use objc2::rc::Retained;
+    use objc2::runtime::AnyObject;
+    use objc2::{msg_send, MainThreadMarker};
+    use objc2_ui_kit::{
+        UIScreen, UIScrollView, UIScrollViewContentInsetAdjustmentBehavior, UIView,
+        UIViewAutoresizing, UIViewController,
+    };
+
+    if let Some(window) = app.get_webview_window("main") {
+        window.with_webview(|webview| unsafe {
+            let mtm = MainThreadMarker::new().expect("iOS webview setup must run on main thread");
+            let full_screen_frame = {
+                #[allow(deprecated)]
+                UIScreen::mainScreen(mtm).bounds()
+            };
+
+            // Tauri's default iOS frame can sit inside the safe-area bounds,
+            // leaving a visible gap below fixed bottom UI. Use the full screen
+            // and let CSS apply the actual safe-area padding.
+            let view = &*(webview.inner() as *mut UIView);
+            view.setTranslatesAutoresizingMaskIntoConstraints(true);
+            view.setAutoresizingMask(
+                UIViewAutoresizing::FlexibleWidth | UIViewAutoresizing::FlexibleHeight,
+            );
+            view.setFrame(full_screen_frame);
+            view.setClipsToBounds(false);
+
+            if let Some(superview) = view.superview() {
+                superview.setClipsToBounds(false);
+                superview.setFrame(full_screen_frame);
+            }
+
+            let controller = &*(webview.view_controller() as *mut UIViewController);
+            if let Some(controller_view) = controller.view() {
+                controller_view.setClipsToBounds(false);
+                controller_view.setFrame(full_screen_frame);
+            }
+
+            let webview_object = webview.inner() as *mut AnyObject;
+            let scroll_view: Retained<UIScrollView> = msg_send![webview_object, scrollView];
+            scroll_view.setContentInsetAdjustmentBehavior(
+                UIScrollViewContentInsetAdjustmentBehavior::Never,
+            );
+        })?;
+    }
+
+    Ok(())
+}
+
 // ── Query Commands ───────────────────────────────────────────
 // The `personal_*` RPC namespace (balance, sendToAddress, history, ...) is
 // deliberately NOT exposed. That namespace requires the supporter node to
@@ -925,6 +976,12 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_safe_area_insets_css::init())
+        .setup(|_app| {
+            #[cfg(target_os = "ios")]
+            extend_ios_webview_into_safe_area(_app)?;
+
+            Ok(())
+        })
         .manage(AppState {
             rpc: Mutex::new(None),
             wallet_unlocked: Mutex::new(false),

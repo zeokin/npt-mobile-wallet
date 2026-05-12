@@ -42,6 +42,17 @@ argon2 = "0.5"
 zeroize = { version = "1", features = ["derive"] }
 bincode = "1"
 
+[target.'cfg(target_os = "ios")'.dependencies]
+objc2 = "0.6.4"
+objc2-core-foundation = "0.3.2"
+objc2-ui-kit = { version = "0.3.2", features = [
+  "objc2-core-foundation",
+  "UIScreen",
+  "UIScrollView",
+  "UIView",
+  "UIViewController",
+] }
+
 # Override leveldb-sys with a stub — we don't use LevelDB in the mobile wallet,
 # but neptune-cash pulls it in transitively. The stub avoids CMake cross-compile issues.
 [patch.crates-io]

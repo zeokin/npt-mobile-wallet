@@ -72,7 +72,7 @@ export default function SeedImportScreen() {
   };
 
   return (
-    <div className="flex flex-col h-full bg-[var(--npt-logo-bg)] safe-top safe-bottom">
+    <div className="flex flex-col h-full bg-[var(--npt-logo-bg)] safe-top">
       {/* Header */}
       <div className="flex items-center px-2 py-2">
         <button
@@ -84,7 +84,7 @@ export default function SeedImportScreen() {
         <h1 className="flex-1 text-center text-lg font-semibold pr-4">Import Wallet</h1>
       </div>
 
-      <div className="flex-1 overflow-y-auto">
+      <div className="flex-1 min-h-0 overflow-y-auto">
         {step === "words" && (
           <div className="flex gap-4 flex-col animate-fade-in">
             <div className="flex justify-center gap-3 py-2 bg-[var(--npt-success)] shadow-md">
@@ -126,16 +126,16 @@ export default function SeedImportScreen() {
         )}
 
         {step === "password" && (
-          <div className="animate-fade-in h-full fiex flex-col">
+          <div className="animate-fade-in min-h-full flex flex-col">
             {/* Top logo section - #EDF1F9 bg */}
-            <div className="h-1/4 bg-[var(--npt-logo-bg)] flex flex-row items-center justify-center gap-2 pb-6 pt-4">
+            <div className="basis-1/4 shrink-0 bg-[var(--npt-logo-bg)] flex flex-row items-center justify-center gap-2 pb-6 pt-4">
               <NeptuneLogo size={56} />
               <NeptuneText size={120} />
             </div>
 
             {/* White password section */}
-            <div className="h-3/4 bg-white shadow-2xl shadow-black px-4 pb-4 flex flex-col rounded-t-3xl">
-              <h2 className="h-1/6 flex text-lg text-center font-bold flex-col justify-center item-center text-[var(--npt-muted)]">Create new Password</h2>
+            <div className="flex-1 bg-white shadow-2xl shadow-black px-4 safe-bottom-card flex flex-col rounded-t-3xl">
+              <h2 className="h-1/6 flex text-lg text-center font-bold flex-col justify-center items-center text-[var(--npt-muted)]">Create new Password</h2>
 
               <div className="h-5/6 flex space-y-5 flex-col gap-1">
                 {/* New password */}
@@ -144,16 +144,19 @@ export default function SeedImportScreen() {
                   <div className="flex items-center border-b border-[var(--npt-border)]">
                     <input
                       type={showPin ? "text" : "password"}
+                      autoComplete="new-password"
                       value={pin}
                       onChange={(e) => setPin(e.target.value)}
                       className="flex-1 bg-transparent py-1 text-[var(--npt-text)] focus:outline-none"
                     />
                     <button
                       type="button"
+                      aria-label={showPin ? "Hide password" : "Show password"}
+                      aria-pressed={showPin}
                       onClick={() => setShowPin(!showPin)}
                       className="text-[var(--npt-muted)]"
                     >
-                      {showPin ? <EyeOff size={18} /> : <Eye size={18} />}
+                      {showPin ? <Eye size={18} /> : <EyeOff size={18} />}
                     </button>
                   </div>
                   {/* Strength indicator */}
@@ -178,6 +181,7 @@ export default function SeedImportScreen() {
                   <div className="flex items-center border-b border-[var(--npt-border)]">
                     <input
                       type={showConfirm ? "text" : "password"}
+                      autoComplete="new-password"
                       value={confirmPin}
                       onChange={(e) => setConfirmPin(e.target.value)}
                       onKeyDown={(e) => e.key === "Enter" && handleImport()}
@@ -185,10 +189,12 @@ export default function SeedImportScreen() {
                     />
                     <button
                       type="button"
+                      aria-label={showConfirm ? "Hide password" : "Show password"}
+                      aria-pressed={showConfirm}
                       onClick={() => setShowConfirm(!showConfirm)}
                       className="text-[var(--npt-muted)]"
                     >
-                      {showConfirm ? <EyeOff size={18} /> : <Eye size={18} />}
+                      {showConfirm ? <Eye size={18} /> : <EyeOff size={18} />}
                     </button>
                   </div>
                 </div>

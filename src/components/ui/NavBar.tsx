@@ -10,7 +10,7 @@ export default function NavBar() {
     { path: "/settings", icon: Settings, label: "Settings" },
   ];
   return (
-    <nav className="flex bg-[var(--npt-bg)] border-t border-[var(--npt-border)] safe-bottom">
+    <nav className="flex shrink-0 bg-[var(--npt-bg)] border-t border-[var(--npt-border)] safe-bottom">
       {tabs.map(({ path, icon: Icon, label }) => {
         const active = location.pathname === path;
         return (

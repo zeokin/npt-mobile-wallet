@@ -100,7 +100,7 @@ export default function SendScreen() {
   };
 
   return (
-    <div className="relative flex flex-col h-full bg-[var(--npt-logo-bg)] safe-top safe-bottom">
+    <div className="relative flex flex-col h-full bg-[var(--npt-logo-bg)] safe-top">
       {/* Header */}
       <div className="flex items-center px-2 py-2">
         <button
@@ -120,7 +120,7 @@ export default function SendScreen() {
           </div>
         </div>
 
-        <div className="h-full bg-white shadow-2xl shadow-black px-4 pt-8 pb-4 flex flex-col rounded-t-3xl">
+        <div className="h-full bg-white shadow-2xl shadow-black px-4 pt-8 safe-bottom-card flex flex-col rounded-t-3xl">
           {/* Form */}
           {(step === "form" || step === "confirm" || step === "building") && (
             <div className="space-y-2 animate-fade-in">
@@ -257,6 +257,7 @@ export default function SendScreen() {
             <div className="flex items-center bg-[var(--npt-logo-bg)] rounded-full border border-[var(--npt-border)] px-4">
               <input
                 type={showPin ? "text" : "password"}
+                autoComplete="current-password"
                 value={pin}
                 autoFocus
                 placeholder="Password"
@@ -265,10 +266,13 @@ export default function SendScreen() {
                 className="flex-1 py-2 bg-transparent text-[var(--npt-text)] focus:outline-none"
               />
               <button
+                type="button"
+                aria-label={showPin ? "Hide password" : "Show password"}
+                aria-pressed={showPin}
                 onClick={() => setShowPin(!showPin)}
                 className="text-[var(--npt-muted)]"
               >
-                {showPin ? <EyeOff size={18} /> : <Eye size={18} />}
+                {showPin ? <Eye size={18} /> : <EyeOff size={18} />}
               </button>
             </div>
             <div className="flex gap-2 pt-1">

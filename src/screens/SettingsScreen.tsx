@@ -103,6 +103,7 @@ export default function SettingsScreen() {
               <div className="flex-1 flex items-center border border-[var(--npt-border)] rounded-md bg-[var(--npt-bg)] px-3">
                 <input
                   type={showSeedPin ? "text" : "password"}
+                  autoComplete="current-password"
                   placeholder="Enter Your Password"
                   value={seedPin}
                   onChange={(e) => setSeedPin(e.target.value)}
@@ -110,10 +111,13 @@ export default function SettingsScreen() {
                   className="flex-1 py-2 bg-transparent text-[var(--npt-text)] text-sm focus:outline-none"
                 />
                 <button
+                  type="button"
+                  aria-label={showSeedPin ? "Hide password" : "Show password"}
+                  aria-pressed={showSeedPin}
                   onClick={() => setShowSeedPin(!showSeedPin)}
                   className="text-[var(--npt-muted)] p-0.5"
                 >
-                  {showSeedPin ? <EyeOff size={16} /> : <Eye size={16} />}
+                  {showSeedPin ? <Eye size={16} /> : <EyeOff size={16} />}
                 </button>
               </div>
               <div className="flex justify-center">

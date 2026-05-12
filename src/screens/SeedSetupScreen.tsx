@@ -18,9 +18,9 @@ export default function SeedSetupScreen() {
   if (checking) return <div className="h-full w-full bg-[var(--npt-blue)]" />;
 
   return (
-    <div className="flex flex-col h-full bg-[var(--npt-blue)] safe-top safe-bottom">
+    <div className="relative flex flex-col h-full bg-[var(--npt-blue)] safe-top">
       {/* Centered content */}
-      <div className="h-5/6 flex-1 flex flex-col items-center justify-center gap-2">
+      <div className="flex-1 min-h-0 flex flex-col items-center justify-center gap-2 pb-28">
         <NeptuneLogo size={90} />
         <p className="text-xl text-white/60 font-light">Welcome to</p>
         {/* <h1 className="text-5xl font-bold text-white tracking-tight">neptune</h1> */}
@@ -28,7 +28,7 @@ export default function SeedSetupScreen() {
       </div>
 
       {/* Bottom actions */}
-      <div className="h-1/6 flex flex-col gap-2">
+      <div className="absolute left-0 right-0 bottom-0 flex flex-col gap-2 safe-bottom-actions">
         <div className="flex justify-center"><button
           onClick={() => navigate("/seed/create")}
           className="w-2/3 py-1 rounded-full bg-white text-[var(--npt-blue)] text-lg font-semibold active:opacity-90 transition-opacity"
