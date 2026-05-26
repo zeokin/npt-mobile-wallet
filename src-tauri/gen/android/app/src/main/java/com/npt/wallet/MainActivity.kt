@@ -1,4 +1,4 @@
-package com.uni.npt_mobile_wallet
+package com.npt.wallet
 
 import android.os.Bundle
 import androidx.activity.enableEdgeToEdge

@@ -137,7 +137,7 @@ export default function SettingsScreen() {
             <Lock size={16} />
             Lock Wallet
           </button>
-          <p className="text-xs text-center text-[var(--npt-muted)] pt-2">Neptune Wallet v0.1.0</p>
+          <p className="text-xs text-center text-[var(--npt-muted)] pt-2">Neptune Cash Wallet v0.1.1</p>
         </div>
       </div>
 

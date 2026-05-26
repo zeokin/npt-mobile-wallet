@@ -1,10 +1,9 @@
 name: Release
 
 # Runs when you push a git tag shaped like v1.2.3.
-# Builds a signed Android APK on GitHub's runner and attaches it to a draft
-# GitHub Release. This gives users a verifiable provenance chain: the binary
-# they download came from a specific commit, built using this committed
-# workflow, on a clean GitHub VM — no one's personal laptop involved.
+# Builds signed Android APK and AAB artifacts on GitHub runners and attaches
+# them to a draft GitHub Release. The APK is for direct installs; the AAB is
+# for Google Play upload.
 
 on:
   push:
@@ -15,25 +14,21 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  RUST_MIN_STACK: 16777216
+  ANDROID_NDK_VERSION: 27.0.12077973
+
 jobs:
-  android-release:
+  build-apk:
     name: Build + sign Android APK
     runs-on: ubuntu-latest
     timeout-minutes: 60
     permissions:
-      contents: write  # needed to create the GitHub Release
-    # neptune-cash has very deep macro expansions (the RpcApi blanket impl)
-    # that exceed rustc's default thread stack on GitHub runners. Bump it.
-    env:
-      RUST_MIN_STACK: 16777216
+      contents: read
 
     steps:
       - uses: actions/checkout@v4
 
-      # GitHub runners only have ~14 GB free disk. Our Tauri build
-      # produces large LTO archives for two Android targets, which
-      # easily fills the root filesystem. Remove preinstalled tools
-      # we don't need (.NET, Haskell, CodeQL, etc.) to free ~25 GB.
       - name: Free disk space
         uses: jlumbroso/free-disk-space@main
         with:
@@ -45,12 +40,7 @@ jobs:
           docker-images: true
           swap-storage: true
 
-      # GitHub runners have only 7 GB RAM; our release profile uses
-      # `codegen-units = 1` + LTO which spikes memory during linking.
-      # Add swap so the build doesn't OOM.
       - name: Add swap space
-        # GitHub runners ship with /swapfile already mounted (4 GB).
-        # Disable it and replace with a 10 GB one so LTO linking has room.
         run: |
           sudo swapoff /swapfile || true
           sudo rm -f /swapfile
@@ -82,10 +72,6 @@ jobs:
         with:
           workspaces: './src-tauri -> target'
 
-      # The generated Android Gradle project invokes `cargo tauri` as a
-      # subcommand when building per-ABI Rust libs. That requires the
-      # tauri-cli Cargo subcommand to be on PATH — the npm package alone
-      # is not enough. Install a prebuilt binary (fast).
       - name: Install cargo-tauri CLI
         uses: taiki-e/install-action@v2
         with:
@@ -95,14 +81,12 @@ jobs:
         uses: android-actions/setup-android@v3
 
       - name: Install Android NDK
-        run: echo "y" | sdkmanager "ndk;27.0.12077973" > /dev/null
+        run: echo "y" | sdkmanager "ndk;$ANDROID_NDK_VERSION" > /dev/null
 
       - name: Install npm dependencies
         run: npm ci
 
       - name: Decode signing keystore
-        # Decode the base64-encoded keystore from repo secrets to a temp file.
-        # The secret itself is never printed to logs.
         run: |
           echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > /tmp/release.keystore
           if [ ! -s /tmp/release.keystore ]; then
@@ -110,13 +94,10 @@ jobs:
             exit 1
           fi
 
-      - name: Build Android APK (unsigned)
-        env:
-          NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/27.0.12077973
-        # --apk skips the AAB build. The AAB rebuild uses different
-        # feature flags, so cargo treats it as a fresh config and
-        # duplicates the target dir, filling the runner's disk.
-        run: npx @tauri-apps/cli android build --apk --target aarch64 --target x86_64
+      - name: Build Android APK
+        run: |
+          export NDK_HOME="$ANDROID_HOME/ndk/$ANDROID_NDK_VERSION"
+          npx @tauri-apps/cli android build --apk --target aarch64 --target x86_64
 
       - name: Align and sign APK
         env:
@@ -126,8 +107,10 @@ jobs:
           TAG: ${{ github.ref_name }}
         run: |
           APK_DIR="src-tauri/gen/android/app/build/outputs/apk/universal/release"
-          BT_DIR="$(ls -d $ANDROID_HOME/build-tools/* | sort -V | tail -1)"
-          OUT="$APK_DIR/npt-wallet-$TAG.apk"
+          BT_DIR="$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)"
+          OUT_DIR="release-artifacts"
+          OUT="$OUT_DIR/npt-wallet-$TAG.apk"
+          mkdir -p "$OUT_DIR"
 
           "$BT_DIR/zipalign" -f 4 \
             "$APK_DIR/app-universal-release-unsigned.apk" \
@@ -142,37 +125,172 @@ jobs:
             "$APK_DIR/aligned.apk"
 
           "$BT_DIR/apksigner" verify --verbose "$OUT"
-          echo "SIGNED_APK=$OUT" >> $GITHUB_ENV
-
-      - name: Compute SHA256 of the signed APK
-        run: |
-          sha256sum "$SIGNED_APK" > "$SIGNED_APK.sha256"
-          cat "$SIGNED_APK.sha256"
+          sha256sum "$OUT" > "$OUT.sha256"
 
       - name: Clean up keystore
         if: always()
         run: rm -f /tmp/release.keystore
 
+      - name: Upload APK artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: npt-wallet-apk-${{ github.ref_name }}
+          path: release-artifacts/*
+          retention-days: 7
+
+  build-aab:
+    name: Build + sign Android AAB
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Free disk space
+        uses: jlumbroso/free-disk-space@main
+        with:
+          tool-cache: false
+          android: false
+          dotnet: true
+          haskell: true
+          large-packages: true
+          docker-images: true
+          swap-storage: true
+
+      - name: Add swap space
+        run: |
+          sudo swapoff /swapfile || true
+          sudo rm -f /swapfile
+          sudo fallocate -l 10G /swapfile
+          sudo chmod 600 /swapfile
+          sudo mkswap /swapfile
+          sudo swapon /swapfile
+          free -h
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Setup JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: 'aarch64-linux-android,x86_64-linux-android'
+
+      - name: Cache Rust build
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: './src-tauri -> target'
+
+      - name: Install cargo-tauri CLI
+        uses: taiki-e/install-action@v2
+        with:
+          tool: tauri-cli@2
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android NDK
+        run: echo "y" | sdkmanager "ndk;$ANDROID_NDK_VERSION" > /dev/null
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: Decode signing keystore
+        run: |
+          echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > /tmp/release.keystore
+          if [ ! -s /tmp/release.keystore ]; then
+            echo "::error::ANDROID_KEYSTORE_BASE64 secret is missing or empty"
+            exit 1
+          fi
+
+      - name: Build Android AAB
+        run: |
+          export NDK_HOME="$ANDROID_HOME/ndk/$ANDROID_NDK_VERSION"
+          npx @tauri-apps/cli android build --aab --target aarch64 --target x86_64
+
+      - name: Sign AAB
+        env:
+          KS_PASS: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_PASS: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          AAB_IN="src-tauri/gen/android/app/build/outputs/bundle/universalRelease/app-universal-release.aab"
+          OUT_DIR="release-artifacts"
+          OUT="$OUT_DIR/npt-wallet-$TAG.aab"
+          mkdir -p "$OUT_DIR"
+
+          jarsigner \
+            -keystore /tmp/release.keystore \
+            -storepass "$KS_PASS" \
+            -keypass "$KEY_PASS" \
+            -sigalg SHA256withRSA \
+            -digestalg SHA-256 \
+            -signedjar "$OUT" \
+            "$AAB_IN" \
+            "$KEY_ALIAS"
+
+          jarsigner -verify -verbose -certs "$OUT"
+          sha256sum "$OUT" > "$OUT.sha256"
+
+      - name: Clean up keystore
+        if: always()
+        run: rm -f /tmp/release.keystore
+
+      - name: Upload AAB artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: npt-wallet-aab-${{ github.ref_name }}
+          path: release-artifacts/*
+          retention-days: 7
+
+  create-release:
+    name: Create draft GitHub Release
+    runs-on: ubuntu-latest
+    needs: [build-apk, build-aab]
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download signed artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: npt-wallet-*-${{ github.ref_name }}
+          path: release-artifacts
+          merge-multiple: true
+
       - name: Create draft GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          name: NPT Mobile Wallet ${{ github.ref_name }}
+          name: Neptune Cash Wallet ${{ github.ref_name }}
           draft: true
           prerelease: false
           generate_release_notes: true
-          files: |
-            ${{ env.SIGNED_APK }}
-            ${{ env.SIGNED_APK }}.sha256
+          files: release-artifacts/*
           body: |
             Automated release from GitHub Actions. Built from commit `${{ github.sha }}`.
 
-            ### Verifying the binary
+            This release uses Android package name `com.npt.wallet` and app
+            name `Neptune Cash Wallet`.
 
-            This APK was built on GitHub's Ubuntu runner using the committed
-            workflow at `.github/workflows/release.yml`. No developer machine
-            was involved. You can verify the SHA256 hash below matches the
-            published `.sha256` file.
+            ### Assets
 
-            Compare the binary's signing certificate fingerprint (from
-            `apksigner verify --print-certs`) against previous releases to
-            confirm the key has not changed.
+            - `npt-wallet-${{ github.ref_name }}.apk` is for direct Android installation.
+            - `npt-wallet-${{ github.ref_name }}.aab` is for Google Play upload.
+            - `.sha256` files allow checksum verification.
+
+            ### Important migration note
+
+            This package name is different from earlier GitHub APK builds that
+            used `com.uni.npt_mobile_wallet`. Android treats this as a new app.
+            Back up the seed phrase before uninstalling an older APK.
