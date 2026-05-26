@@ -50,6 +50,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5a15f179cd60c4584b8a8c596927aadc462e27f2ca70c04e0071964a73ba7a75"
 dependencies = [
  "cfg-if",
+ "getrandom 0.3.4",
  "once_cell",
  "version_check",
  "zerocopy",
@@ -1028,9 +1029,9 @@ checksum = "6245d59a3e82a7fc217c5828a6692dbc6dfb63a0c8c90495621f7b9d79704a0e"
 
 [[package]]
 name = "convert_case"
-version = "0.8.0"
+version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "baaaa0ecca5b51987b9423ccdc971514dd8b0bb7b4060b983d3664dad3f1f89f"
+checksum = "db05ffb6856bf0ecdf6367558a76a0e8a77b1713044eb92845c692100ed50190"
 dependencies = [
  "unicode-segmentation",
 ]
@@ -1297,6 +1298,20 @@ dependencies = [
  "darling_core",
  "quote",
  "syn 2.0.117",
+]
+
+[[package]]
+name = "dashmap"
+version = "6.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e6361d5c062261c78a176addb82d4c821ae42bed6089de0e12603cd25de2059c"
+dependencies = [
+ "cfg-if",
+ "crossbeam-utils",
+ "hashbrown 0.14.5",
+ "lock_api",
+ "once_cell",
+ "parking_lot_core",
 ]
 
 [[package]]
@@ -3980,8 +3995,9 @@ dependencies = [
 
 [[package]]
 name = "neptune-cash"
-version = "0.8.0"
-source = "git+https://github.com/Neptune-Crypto/neptune-core.git?tag=v0.8.0#293fe3f40554b0fea61f61fb24537a9df23c1d5a"
+version = "0.10.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3daee73f0d2a6c0c6b25dd5469f0b4f6141db8898f0a23f9f17078f9c617919b"
 dependencies = [
  "aead",
  "aes-gcm",
@@ -4038,16 +4054,18 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "tracing-test",
+ "tracing-throttle",
  "whoami",
  "zeroize",
 ]
 
 [[package]]
 name = "neptune-rpc-macros"
-version = "0.8.0"
-source = "git+https://github.com/Neptune-Crypto/neptune-core.git?tag=v0.8.0#293fe3f40554b0fea61f61fb24537a9df23c1d5a"
+version = "0.10.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2f6642887960c9d0bea117ecf7a686aa137fde48102f8fc183ce248769edac6c"
 dependencies = [
- "convert_case 0.8.0",
+ "convert_case 0.9.0",
  "quote",
  "syn 2.0.117",
 ]
@@ -7328,6 +7346,19 @@ checksum = "ad06847b7afb65c7866a36664b75c40b895e318cea4f71299f013fb22965329d"
 dependencies = [
  "quote",
  "syn 2.0.117",
+]
+
+[[package]]
+name = "tracing-throttle"
+version = "0.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5e4e430251f5ca8f86ea941286923dc2e91be7ca95fec777d75ee8ae1c493f64"
+dependencies = [
+ "ahash",
+ "dashmap",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]

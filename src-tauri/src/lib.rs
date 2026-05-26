@@ -303,8 +303,14 @@ fn generate_local_address(
 /// 1. Get chain tip (mutator set accumulator)
 /// 2. Select input UTXOs
 /// 3. Build TransactionDetails with on-chain notifications
-/// 4. Generate ProofCollection (STARK proofs — may take minutes)
-/// 5. Submit via wallet_submitTransaction
+/// 4. If post-HF-β, attach lustration announcements (requires user opt-in)
+/// 5. Generate ProofCollection (STARK proofs — may take minutes)
+/// 6. Submit via wallet_submitTransaction
+///
+/// `accept_lustrations`: if any input falls under the lustration barrier
+/// (HF-β at block 38,000), the user must confirm before the tx is built.
+/// When required-but-not-accepted, returns an error prefixed
+/// `LUSTRATION_REQUIRED:<threshold>` so the UI can prompt and retry.
 #[tauri::command]
 async fn send_transaction(
     app: tauri::AppHandle,
@@ -312,7 +318,7 @@ async fn send_transaction(
     recipient_address: String,
     amount: String,
     fee: String,
-    utxo_indices: Vec<usize>, // indices into the stored UTXOs to spend
+    accept_lustrations: Option<bool>,
     state: State<'_, AppState>,
 ) -> Result<String, String> {
     check_session(&state)?;
@@ -586,17 +592,47 @@ async fn send_transaction(
     }
     debug_log!("[SEND] {} outputs created", tx_outputs.len());
 
+    // Step 8.5: Lustration check (HF-β at block 38,000).
+    // If the chain has a lustration barrier and any of our inputs fall at
+    // or below the threshold, the supporter will reject the tx unless it
+    // carries lustration announcements. Generate them while we still hold
+    // a borrow of unlocked_utxos (it's moved into new_without_coinbase next).
+    use neptune_cash::api::export::Announcement;
+    use neptune_cash::protocol::consensus::block::block_header::BlockPow;
+    let pow: BlockPow = tip_resp.block.kernel.header.pow.into();
+    let lustration_status_result = pow.lustration_status();
+    let lustration_announcements: Vec<Announcement> = match lustration_status_result {
+        Ok(status) => Announcement::lustration_announcements(status, &unlocked_utxos),
+        Err(_) => vec![], // pre-HF-β chain, no lustration field
+    };
+    if !lustration_announcements.is_empty() && !accept_lustrations.unwrap_or(false) {
+        let status = lustration_status_result
+            .expect("lustration_status must be Ok since we generated announcements");
+        return Err(format!(
+            "LUSTRATION_REQUIRED:{}",
+            status.max_lustrating_aocl_leaf_index
+        ));
+    }
+
     // Step 9: Build TransactionDetails
     debug_log!("[SEND] Step 9: Building TransactionDetails...");
     let timestamp = Timestamp::now();
-    let transaction_details = neptune_cash::api::export::TransactionDetails::new_without_coinbase(
-        unlocked_utxos,
-        tx_outputs,
-        fee_val,
-        timestamp,
-        tip_msa,
-        network,
-    );
+    let mut transaction_details =
+        neptune_cash::api::export::TransactionDetails::new_without_coinbase(
+            unlocked_utxos,
+            tx_outputs,
+            fee_val,
+            timestamp,
+            tip_msa,
+            network,
+        );
+    if !lustration_announcements.is_empty() {
+        debug_log!(
+            "[SEND] Attaching {} lustration announcement(s)",
+            lustration_announcements.len()
+        );
+        transaction_details = transaction_details.with_announcements(lustration_announcements);
+    }
     debug_log!(
         "[SEND] TransactionDetails built ({} inputs)",
         selected.len()

@@ -45,6 +45,25 @@ export interface DiscoveredUtxo {
 export const syncWallet = (pin: string | null, numKeys?: number) =>
   invoke<SyncResult>("sync_wallet", { pin: pin || null, numKeys: numKeys || null });
 
+// Send a transaction. The backend re-scans for all unspent UTXOs and
+// selects inputs itself, so the UI doesn't need to pass UTXO indices.
+// `acceptLustrations` must be `true` on retry after the backend returned a
+// `LUSTRATION_REQUIRED:<threshold>` error.
+export const sendTransaction = (
+  pin: string,
+  recipientAddress: string,
+  amount: string,
+  fee: string,
+  acceptLustrations: boolean,
+) =>
+  invoke<string>("send_transaction", {
+    pin,
+    recipientAddress,
+    amount,
+    fee,
+    acceptLustrations,
+  });
+
 // Check if a transaction was mined (by its output addition records)
 export const checkTransactionMined = (additionRecordHexes: string[]) =>
   invoke<number[]>("check_transaction_mined", { additionRecordHexes });

@@ -1,9 +1,8 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
-import { invoke } from "@tauri-apps/api/core";
 import { ChevronLeft, Send, Info, AlertCircle, Eye, EyeOff, Clock } from "lucide-react";
-import { hasPendingTx } from "../api/rpc";
+import { hasPendingTx, sendTransaction } from "../api/rpc";
 import { useSettingsStore } from "../store/settings-store";
 import { useWalletStore } from "../store/wallet-store";
 
@@ -18,8 +17,9 @@ export default function SendScreen() {
   const [showPin, setShowPin] = useState(false);
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState("");
-  const [step, setStep] = useState<"form" | "confirm" | "building">("form");
+  const [step, setStep] = useState<"form" | "confirm" | "building" | "lustration">("form");
   const [pendingBlocked, setPendingBlocked] = useState(false);
+  const [lustrationThreshold, setLustrationThreshold] = useState<string | null>(null);
 
   useEffect(() => {
     hasPendingTx().then(setPendingBlocked).catch(() => { });
@@ -53,23 +53,23 @@ export default function SendScreen() {
     setStep("confirm");
   };
 
-  const handleSend = async () => {
-    if (!pin) {
-      toast.error("Enter your password to confirm");
-      return;
-    }
+  // Sends a transaction. When `acceptLustrations` is true we retry after
+  // the user has explicitly confirmed the lustration prompt. The PIN is
+  // kept around between the first attempt and the lustration retry so the
+  // user doesn't have to re-enter it; it's cleared on any terminal outcome.
+  const submitSend = async (acceptLustrations: boolean) => {
     setStep("building");
     setLoading(true);
     setStatus("Building transaction...");
 
     try {
-      const resultStr = await invoke<string>("send_transaction", {
+      const resultStr = await sendTransaction(
         pin,
-        recipientAddress: address.trim(),
+        address.trim(),
         amount,
         fee,
-        utxoIndices: unspentUtxos.map((_, i) => i),
-      });
+        acceptLustrations,
+      );
 
       let additionRecordHexes: string[] = [];
       try {
@@ -87,16 +87,39 @@ export default function SendScreen() {
       });
       toast.success("Transaction sent!");
       setStatus("");
+      setPin("");
       navigate("/wallet", { replace: true });
     } catch (e) {
       const msg = String(e);
       setStatus("");
-      setStep("form");
-      toast.error(msg, { duration: 10000 });
+      // Backend signals lustration requirement with a stable prefix so we
+      // can route it to the dedicated confirmation step instead of a toast.
+      // Don't clear the PIN here — the retry uses the same value.
+      const lustrationMatch = msg.match(/LUSTRATION_REQUIRED:(\d+)/);
+      if (lustrationMatch) {
+        setLustrationThreshold(lustrationMatch[1]);
+        setStep("lustration");
+      } else {
+        setStep("form");
+        setPin("");
+        toast.error(msg, { duration: 10000 });
+      }
     } finally {
       setLoading(false);
-      setPin("");
     }
+  };
+
+  const handleSend = async () => {
+    if (!pin) {
+      toast.error("Enter your password to confirm");
+      return;
+    }
+    await submitSend(false);
+  };
+
+  const handleAcceptLustration = async () => {
+    setLustrationThreshold(null);
+    await submitSend(true);
   };
 
   return (
@@ -310,6 +333,48 @@ export default function SendScreen() {
             ))}
           </div>
           <p className="text-sm text-white font-medium">{status}</p>
+        </div>
+      )}
+
+      {/* Lustration confirmation modal — shown when the supporter requires
+          lustration announcements for inputs below the network threshold. */}
+      {step === "lustration" && (
+        <div className="fixed inset-0 z-40 bg-black/50 flex items-start justify-center pt-20 px-4">
+          <div className="w-full max-w-sm bg-white rounded-2xl p-5 space-y-3 shadow-2xl animate-fade-in">
+            <div className="flex items-center gap-2">
+              <AlertCircle size={20} className="text-[var(--npt-warning)]" />
+              <h3 className="text-lg font-semibold text-[var(--npt-text)]">
+                Lustration required
+              </h3>
+            </div>
+            <p className="text-xs text-[var(--npt-muted)] leading-relaxed">
+              Some of your inputs are from before the network upgrade
+              (AOCL ≤ {lustrationThreshold ?? "?"}). The supporter will reject
+              this transaction unless it carries lustration announcements.
+              Confirm to proceed; this is required by the network and cannot
+              be skipped.
+            </p>
+            <div className="flex gap-2 pt-1">
+              <button
+                onClick={() => {
+                  setPin("");
+                  setLustrationThreshold(null);
+                  setStep("form");
+                }}
+                disabled={loading}
+                className="flex-1 py-2 rounded-full bg-[var(--npt-logo-bg)] text-[var(--npt-text)] font-medium active:opacity-80"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleAcceptLustration}
+                disabled={loading}
+                className="flex-1 py-2 rounded-full bg-[var(--npt-blue)] text-white font-semibold disabled:opacity-50 active:opacity-90"
+              >
+                Continue
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>
