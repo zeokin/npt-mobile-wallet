@@ -125,7 +125,10 @@ jobs:
             "$APK_DIR/aligned.apk"
 
           "$BT_DIR/apksigner" verify --verbose "$OUT"
-          sha256sum "$OUT" > "$OUT.sha256"
+          (
+            cd "$OUT_DIR"
+            sha256sum "npt-wallet-$TAG.apk" > "npt-wallet-$TAG.apk.sha256"
+          )
 
       - name: Clean up keystore
         if: always()
@@ -135,7 +138,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: npt-wallet-apk-${{ github.ref_name }}
-          path: release-artifacts/*
+          path: |
+            release-artifacts/*.apk
+            release-artifacts/*.apk.sha256
           retention-days: 7
 
   build-aab:
@@ -241,7 +246,10 @@ jobs:
             "$KEY_ALIAS"
 
           jarsigner -verify -verbose -certs "$OUT"
-          sha256sum "$OUT" > "$OUT.sha256"
+          (
+            cd "$OUT_DIR"
+            sha256sum "npt-wallet-$TAG.aab" > "npt-wallet-$TAG.aab.sha256"
+          )
 
       - name: Clean up keystore
         if: always()
@@ -251,7 +259,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: npt-wallet-aab-${{ github.ref_name }}
-          path: release-artifacts/*
+          path: |
+            release-artifacts/*.aab
+            release-artifacts/*.aab.sha256
           retention-days: 7
 
   create-release:
