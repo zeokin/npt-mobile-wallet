@@ -1,10 +1,13 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { toast } from "sonner";
-import { Eye, EyeOff, Shield, Link2, Lock } from "lucide-react";
+import { ExternalLink, Eye, EyeOff, FileText, Shield, Link2, Lock } from "lucide-react";
 import { disconnectNode, exportSeedPhrase, lockWallet } from "../api/rpc";
 import { useSettingsStore } from "../store/settings-store";
 import NavBar from "../components/ui/NavBar";
+
+const PRIVACY_POLICY_URL = "https://zeokin.github.io/npt-mobile-wallet/privacy-policy/";
 
 export default function SettingsScreen() {
   const navigate = useNavigate();
@@ -27,6 +30,14 @@ export default function SettingsScreen() {
       setSeedWords(words); setShowSeed(true);
     } catch (e) { toast.error(String(e)); }
     setSeedPin("");
+  };
+
+  const handleOpenPrivacyPolicy = async () => {
+    try {
+      await openUrl(PRIVACY_POLICY_URL);
+    } catch {
+      toast.error("Could not open privacy policy");
+    }
   };
 
   return (
@@ -128,6 +139,22 @@ export default function SettingsScreen() {
           )}
         </div>
 
+        {/* Legal */}
+        <div className="p-3 rounded-xl bg-white border border-[var(--npt-border)] shadow-sm space-y-2">
+          <div className="flex items-center gap-2">
+            <FileText size={18} className="text-[var(--npt-blue)]" />
+            <h2 className="text-sm font-semibold text-[var(--npt-text)]">Legal</h2>
+          </div>
+          <button
+            onClick={handleOpenPrivacyPolicy}
+            className="w-full flex items-center justify-between gap-2 py-2 text-sm font-medium text-[var(--npt-text)] active:opacity-80"
+            aria-label="Open privacy policy"
+          >
+            <span>Privacy Policy</span>
+            <ExternalLink size={16} className="text-[var(--npt-muted)]" />
+          </button>
+        </div>
+
         {/* Action buttons */}
         <div className="space-y-2 pb-4">
           <button
@@ -137,7 +164,7 @@ export default function SettingsScreen() {
             <Lock size={16} />
             Lock Wallet
           </button>
-          <p className="text-xs text-center text-[var(--npt-muted)] pt-2">Neptune Cash Wallet v0.1.2</p>
+          <p className="text-xs text-center text-[var(--npt-muted)] pt-2">Neptune Cash Wallet v0.1.3</p>
         </div>
       </div>
 
