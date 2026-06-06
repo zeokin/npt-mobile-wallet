@@ -529,6 +529,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4cbbc9d0964165b47557570cce6c952866c2678457aca742aafc9fb771d30270"
 
 [[package]]
+name = "base16ct"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4c7f02d4ea65f2c1853089ffd8d2787bdbc63de2f0d29dedbcf8ccdfa0ccd4cf"
+
+[[package]]
 name = "base256emoji"
 version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1170,6 +1176,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "460fbee9c2c2f33933d720630a6a0bac33ba7053db5344fac858d4b8952d77d5"
 
 [[package]]
+name = "crypto-bigint"
+version = "0.5.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0dc92fb57ca44df6db8059111ab3af99a63d5d0f8375d9972e319a379c6bab76"
+dependencies = [
+ "generic-array",
+ "rand_core 0.6.4",
+ "subtle",
+ "zeroize",
+]
+
+[[package]]
 name = "crypto-common"
 version = "0.1.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1437,6 +1455,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9ed9a281f7bc9b7576e61468ba615a66a5c8cfdff42420a70aa82701a3b1e292"
 dependencies = [
  "block-buffer",
+ "const-oid",
  "crypto-common",
  "subtle",
 ]
@@ -1581,6 +1600,21 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d0881ea181b1df73ff77ffaaf9c7544ecc11e82fba9b5f27b262a3c73a332555"
 
 [[package]]
+name = "ecdsa"
+version = "0.16.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ee27f32b5c5292967d2d4a9d7f1e0b0aed2c15daded5a60300e4abb9d8020bca"
+dependencies = [
+ "der",
+ "digest",
+ "elliptic-curve",
+ "rfc6979",
+ "serdect",
+ "signature",
+ "spki",
+]
+
+[[package]]
 name = "ed25519"
 version = "2.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1621,6 +1655,27 @@ name = "either"
 version = "1.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "48c757948c5ede0e46177b7add2e67155f70e33c07fea8284df6576da70b3719"
+
+[[package]]
+name = "elliptic-curve"
+version = "0.13.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b5e6043086bf7973472e0c7dff2142ea0b680d30e18d9cc40f267efbf222bd47"
+dependencies = [
+ "base16ct",
+ "crypto-bigint",
+ "digest",
+ "ff",
+ "generic-array",
+ "group",
+ "hkdf",
+ "pkcs8",
+ "rand_core 0.6.4",
+ "sec1",
+ "serdect",
+ "subtle",
+ "zeroize",
+]
 
 [[package]]
 name = "embed-resource"
@@ -1755,6 +1810,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1e6853b52649d4ac5c0bd02320cddc5ba956bdb407c4b75a2c6b75bf51500f8c"
 dependencies = [
  "simd-adler32",
+]
+
+[[package]]
+name = "ff"
+version = "0.13.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c0b50bfb653653f9ca9095b427bed08ab8d75a137839d9ad64eb11810d5b6393"
+dependencies = [
+ "rand_core 0.6.4",
+ "subtle",
 ]
 
 [[package]]
@@ -2122,6 +2187,7 @@ checksum = "85649ca51fd72272d7821adaf274ad91c288277713d9c18820d8499a7ff69e9a"
 dependencies = [
  "typenum",
  "version_check",
+ "zeroize",
 ]
 
 [[package]]
@@ -2299,6 +2365,17 @@ dependencies = [
  "glib-sys",
  "libc",
  "system-deps",
+]
+
+[[package]]
+name = "group"
+version = "0.13.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f0f9ef7462f7c099f518d754361858f86d8a07af53ba9af0fe635bbccb151a63"
+dependencies = [
+ "ff",
+ "rand_core 0.6.4",
+ "subtle",
 ]
 
 [[package]]
@@ -3053,6 +3130,21 @@ checksum = "5dea2b27dd239b2556ed7a25ba842fe47fd602e7fc7433c2a8d6106d4d9edd70"
 dependencies = [
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "k256"
+version = "0.13.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f6e3919bbaa2945715f0bb6d3934a173d1e9a59ac23767fbaaef277265a7411b"
+dependencies = [
+ "cfg-if",
+ "ecdsa",
+ "elliptic-curve",
+ "once_cell",
+ "serdect",
+ "sha2",
+ "signature",
 ]
 
 [[package]]
@@ -3995,9 +4087,9 @@ dependencies = [
 
 [[package]]
 name = "neptune-cash"
-version = "0.10.2"
+version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3daee73f0d2a6c0c6b25dd5469f0b4f6141db8898f0a23f9f17078f9c617919b"
+checksum = "c98ef1dd49fa6d5662aabb1ad893021762bab0aa2b7b72afeb29e97ad0086cb4"
 dependencies = [
  "aead",
  "aes-gcm",
@@ -4020,6 +4112,7 @@ dependencies = [
  "hex",
  "humantime",
  "itertools",
+ "k256",
  "leveldb-sys",
  "libp2p",
  "memmap2",
@@ -4061,9 +4154,9 @@ dependencies = [
 
 [[package]]
 name = "neptune-rpc-macros"
-version = "0.10.2"
+version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2f6642887960c9d0bea117ecf7a686aa137fde48102f8fc183ce248769edac6c"
+checksum = "dae450542764ee0b5cb9f34294369b97c0114935df583fdeaa6fd58c20d3408c"
 dependencies = [
  "convert_case 0.9.0",
  "quote",
@@ -4191,12 +4284,14 @@ dependencies = [
  "neptune-cash",
  "num-traits",
  "rand 0.8.5",
+ "rayon",
  "reqwest 0.12.28",
  "serde",
  "serde_json",
  "sha2",
  "tauri",
  "tauri-build",
+ "tauri-plugin-barcode-scanner",
  "tauri-plugin-opener",
  "tauri-plugin-safe-area-insets-css",
  "tokio",
@@ -5600,6 +5695,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1e061d1b48cb8d38042de4ae0a7a6401009d6143dc80d2e2d6f31f0bdd6470c7"
 
 [[package]]
+name = "rfc6979"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f8dd2a808d456c4a54e300a23e9f5a67e122c3024119acbfd73e3bf664491cb2"
+dependencies = [
+ "hmac",
+ "subtle",
+]
+
+[[package]]
 name = "ring"
 version = "0.17.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5807,6 +5912,21 @@ name = "scopeguard"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49"
+
+[[package]]
+name = "sec1"
+version = "0.7.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d3e97a565f76233a6003f9f5c54be1d9c5bdfa3eccfb189469f11ec4901c47dc"
+dependencies = [
+ "base16ct",
+ "der",
+ "generic-array",
+ "pkcs8",
+ "serdect",
+ "subtle",
+ "zeroize",
+]
 
 [[package]]
 name = "selectors"
@@ -6044,6 +6164,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "serdect"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a84f14a19e9a014bb9f4512488d9829a68e04ecabffb0f9904cd1ace94598177"
+dependencies = [
+ "base16ct",
+ "serde",
+]
+
+[[package]]
 name = "serialize-to-javascript"
 version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6136,6 +6266,7 @@ version = "2.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "77549399552de45a898a580c1b41d445bf730df867cc44e6c0233bbc4b8329de"
 dependencies = [
+ "digest",
  "rand_core 0.6.4",
 ]
 
@@ -6561,9 +6692,9 @@ dependencies = [
 
 [[package]]
 name = "tasm-lib"
-version = "2.0.0"
+version = "3.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e9a5e07729ad666308a0ff4f88b6648a3a614a75e765a56cc114596b46830aba"
+checksum = "8ad81ba67623d9c739a1dfeed5f30bc23940547694e1663cc632b608d9cd47a0"
 dependencies = [
  "anyhow",
  "arbitrary",
@@ -6579,13 +6710,14 @@ dependencies = [
  "strum",
  "tasm-object-derive",
  "triton-vm",
+ "web-time",
 ]
 
 [[package]]
 name = "tasm-object-derive"
-version = "2.0.0"
+version = "3.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "197db2fc81afe909fbf22253b735c97ba61104973da4cc33f47c96f7c32609de"
+checksum = "5ce340ed33f1b8e870fad8e722a4e7743d196ab71c44aa4458b2a6bfba204e37"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -6721,6 +6853,20 @@ dependencies = [
  "tauri-utils",
  "toml 0.9.12+spec-1.1.0",
  "walkdir",
+]
+
+[[package]]
+name = "tauri-plugin-barcode-scanner"
+version = "2.4.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d3b68f0e3782b61a6e16a67380be40226e2b7233f3e36dadf6e5d03f07d2e7b3"
+dependencies = [
+ "log",
+ "serde",
+ "serde_json",
+ "tauri",
+ "tauri-plugin",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -7385,9 +7531,9 @@ dependencies = [
 
 [[package]]
 name = "triton-air"
-version = "2.0.0"
+version = "3.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b3f4b7234e1f2d3f007de5091aa6777e665884ba2fd8bd24b8906c333b6f2b0d"
+checksum = "80e6cb58505a957367eab288c2d1c9357963b65d244c3868a518a7ffcdb6fe40"
 dependencies = [
  "arbitrary",
  "itertools",
@@ -7399,9 +7545,9 @@ dependencies = [
 
 [[package]]
 name = "triton-constraint-builder"
-version = "2.0.0"
+version = "3.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6be25fa09d751632643b05a81e573aa64ffa6cd290f55bcdf4cbd5bca88191e1"
+checksum = "13821f7d62aa84342a1bd2228b654f17b43a09e2e5feb27d3949c3398e842564"
 dependencies = [
  "itertools",
  "prettyplease",
@@ -7417,9 +7563,9 @@ dependencies = [
 
 [[package]]
 name = "triton-constraint-circuit"
-version = "2.0.0"
+version = "3.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "738e4be633fcef23e45d78a927163746fa72088e21b11cef669c85be7938b313"
+checksum = "f25b8d4522c9c763790315757349bc95c3ba01d3601da7ca1b967f962527de49"
 dependencies = [
  "arbitrary",
  "itertools",
@@ -7432,9 +7578,9 @@ dependencies = [
 
 [[package]]
 name = "triton-isa"
-version = "2.0.0"
+version = "3.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b9b2dba9112d21ecefe8a0a64719221f50bffd585a21e6f2cbe3361e6adaf76c"
+checksum = "451e6fd5114efad0ce516b0fb238e08e69316da7710cf9c93242b0da8522c5a2"
 dependencies = [
  "arbitrary",
  "get-size2",
@@ -7451,9 +7597,9 @@ dependencies = [
 
 [[package]]
 name = "triton-vm"
-version = "2.0.0"
+version = "3.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "59233747518b17f9a4dcda7e176dc446e148fc760bdb864e2bd8934582ccde59"
+checksum = "ee696faa7d4b3ece4bda435894f416bbcbf097285fa301b1b47a0cf003c1a8e4"
 dependencies = [
  "arbitrary",
  "colored",
@@ -7478,6 +7624,7 @@ dependencies = [
  "triton-isa",
  "twenty-first",
  "unicode-width",
+ "web-time",
 ]
 
 [[package]]

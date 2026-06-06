@@ -6,12 +6,19 @@
 //! Flow: seed phrase (18 words) → SecretKeyMaterial → WalletEntropy
 //!       → GenerationSpendingKey(index) → ReceivingAddress
 //!
-//! NOTE: neptune-core v0.7.0 does NOT have a ViewKey type (that's XNT-only).
-//! UTXO scanning approach will need to be discussed with Alan.
+//! Supported key types (neptune-core v0.11.0):
+//!   - "generation"      : quantum-secure, reusable, but very long (no QR).
+//!   - "ec_hybrid"       : elliptic-curve hybrid, short → QR-friendly.
+//!   - "viewing_address" : symmetric viewing address, short → QR-friendly.
+//!   - "symmetric"       : deprecated in v0.11.0; kept for back-compat only.
+//!
+//! All address derivation goes through `WalletEntropy::nth_receiving_address`,
+//! which dispatches to the per-type derivation internally.
 
 use neptune_cash::api::export::KeyType;
 use neptune_cash::application::config::network::Network;
 use neptune_cash::state::wallet::address::ReceivingAddress;
+use neptune_cash::state::wallet::address::SpendingKey;
 use neptune_cash::state::wallet::wallet_entropy::WalletEntropy;
 
 /// Derive a WalletEntropy from a BIP39 seed phrase (18 words).
@@ -25,26 +32,71 @@ pub(crate) fn wallet_entropy_from_phrase(words: &[String]) -> Result<WalletEntro
 /// Derive a receiving address at the given index and key type.
 ///
 /// - `index`: derivation index (0, 1, 2, ...)
-/// - `key_type`: "generation" or "symmetric"
+/// - `key_type`: "generation", "ec_hybrid", "viewing_address", or "symmetric"
 /// - `network`: "main", "testnet", or "regtest"
 ///
-/// Returns the bech32m-encoded address string.
+/// Returns the bech32m-encoded address string. For `ec_hybrid` and
+/// `viewing_address` this encoding is short enough to render as a QR code
+/// (`NPT:<ADDRESS>` payload); `generation` addresses are too long for QR.
 pub(crate) fn derive_receiving_address(
     entropy: &WalletEntropy,
     index: u64,
     key_type: &str,
     network: &str,
 ) -> Result<String, String> {
-    let kt = match key_type {
-        "generation" => KeyType::Generation,
-        "symmetric" => KeyType::Symmetric,
-        other => return Err(format!("Unknown key type: {}", other)),
-    };
+    let kt = key_type_from_str(key_type)?;
     let net = parse_network(network)?;
     let address: ReceivingAddress = entropy.nth_receiving_address(index, kt);
     address
         .to_bech32m(net)
         .map_err(|e| format!("Address encoding failed: {}", e))
+}
+
+/// Map a UI/IPC key-type string to a neptune-core [`KeyType`].
+///
+/// Accepts the canonical snake_case names that `sync` stores on discovered
+/// UTXOs, plus the shorthand aliases the frontend may send.
+pub(crate) fn key_type_from_str(key_type: &str) -> Result<KeyType, String> {
+    match key_type {
+        "generation" => Ok(KeyType::Generation),
+        "ec_hybrid" | "echybrid" => Ok(KeyType::EcHybrid),
+        "viewing_address" | "viewing" => Ok(KeyType::ViewingAddress),
+        "symmetric" => Ok(KeyType::Symmetric),
+        other => Err(format!("Unknown key type: {}", other)),
+    }
+}
+
+/// Derive the [`SpendingKey`] at `index` for a [`KeyType`].
+///
+/// Dispatches to the correct per-type derivation for every key type
+/// (generation, symmetric, EC-hybrid, viewing) and wraps it in the
+/// `SpendingKey` enum via its `From` impls.
+pub(crate) fn nth_spending_key(
+    entropy: &WalletEntropy,
+    key_type: KeyType,
+    index: u64,
+) -> Result<SpendingKey, String> {
+    let sk: SpendingKey = match key_type {
+        KeyType::Generation => entropy.nth_generation_spending_key(index).into(),
+        KeyType::Symmetric => entropy.nth_symmetric_key(index).into(),
+        KeyType::EcHybrid => entropy.nth_ec_hybrid_key(index).into(),
+        KeyType::ViewingAddress => entropy.nth_viewing_address_key(index).into(),
+        // KeyType is #[non_exhaustive]; guard against future variants.
+        other => return Err(format!("Unsupported key type: {other:?}")),
+    };
+    Ok(sk)
+}
+
+/// Derive the [`SpendingKey`] at `index` for the given key-type string.
+///
+/// Used by the send path to reconstruct the unlocking key for a discovered
+/// UTXO from its stored `(key_type, key_index)`.
+pub(crate) fn spending_key_for(
+    entropy: &WalletEntropy,
+    key_type: &str,
+    index: u64,
+) -> Result<SpendingKey, String> {
+    nth_spending_key(entropy, key_type_from_str(key_type)?, index)
 }
 
 fn parse_network(s: &str) -> Result<Network, String> {
@@ -144,5 +196,72 @@ mod tests {
         let entropy = wallet_entropy_from_phrase(&words).unwrap();
         let result = derive_receiving_address(&entropy, 0, "invalid", "main");
         assert!(result.is_err(), "Invalid key type should fail");
+    }
+
+    #[test]
+    fn test_derive_ec_hybrid_address_has_expected_prefix() {
+        let words = test_phrase();
+        let entropy = wallet_entropy_from_phrase(&words).unwrap();
+        let addr = derive_receiving_address(&entropy, 0, "ec_hybrid", "main").unwrap();
+        // EC-hybrid mainnet HRP = "nech" + network char 'm'.
+        assert!(
+            addr.starts_with("nechm1"),
+            "EC-hybrid mainnet address must start with nechm1: {addr}"
+        );
+    }
+
+    #[test]
+    fn test_derive_viewing_address_has_expected_prefix() {
+        let words = test_phrase();
+        let entropy = wallet_entropy_from_phrase(&words).unwrap();
+        let addr = derive_receiving_address(&entropy, 0, "viewing_address", "main").unwrap();
+        // Viewing mainnet HRP = "nview" + network char 'm'.
+        assert!(
+            addr.starts_with("nviewm1"),
+            "Viewing mainnet address must start with nviewm1: {addr}"
+        );
+    }
+
+    #[test]
+    fn test_new_address_types_roundtrip_via_from_bech32m() {
+        use neptune_cash::application::config::network::Network;
+        use neptune_cash::state::wallet::address::ReceivingAddress;
+
+        let words = test_phrase();
+        let entropy = wallet_entropy_from_phrase(&words).unwrap();
+        for kt in ["ec_hybrid", "viewing_address"] {
+            let addr = derive_receiving_address(&entropy, 3, kt, "main").unwrap();
+            // The QR/copy string must decode back to a valid ReceivingAddress
+            // of the right kind (sender-side parsing accepts it).
+            ReceivingAddress::from_bech32m(&addr, Network::Main)
+                .unwrap_or_else(|e| panic!("{kt} address must round-trip via from_bech32m: {e}"));
+        }
+    }
+
+    #[test]
+    fn test_key_type_aliases_agree() {
+        let words = test_phrase();
+        let entropy = wallet_entropy_from_phrase(&words).unwrap();
+        assert_eq!(
+            derive_receiving_address(&entropy, 0, "ec_hybrid", "main").unwrap(),
+            derive_receiving_address(&entropy, 0, "echybrid", "main").unwrap(),
+            "ec_hybrid and echybrid aliases must derive the same address"
+        );
+        assert_eq!(
+            derive_receiving_address(&entropy, 0, "viewing_address", "main").unwrap(),
+            derive_receiving_address(&entropy, 0, "viewing", "main").unwrap(),
+            "viewing_address and viewing aliases must derive the same address"
+        );
+    }
+
+    #[test]
+    fn test_new_address_types_differ_by_index() {
+        let words = test_phrase();
+        let entropy = wallet_entropy_from_phrase(&words).unwrap();
+        for kt in ["ec_hybrid", "viewing_address"] {
+            let a0 = derive_receiving_address(&entropy, 0, kt, "main").unwrap();
+            let a1 = derive_receiving_address(&entropy, 1, kt, "main").unwrap();
+            assert_ne!(a0, a1, "{kt} addresses at different indices must differ");
+        }
     }
 }

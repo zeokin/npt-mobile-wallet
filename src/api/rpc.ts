@@ -42,8 +42,17 @@ export interface DiscoveredUtxo {
   receiver_preimage: unknown;
   aocl_leaf_index: number | null;
 }
-export const syncWallet = (pin: string | null, numKeys?: number) =>
-  invoke<SyncResult>("sync_wallet", { pin: pin || null, numKeys: numKeys || null });
+// Per-key-type scan window (see wallet-store `scanWindow`). Field names match
+// the Rust `ScanWindow` struct so Tauri/serde deserializes it directly.
+export interface ScanWindow {
+  generation: number;
+  ec_hybrid: number;
+  viewing_address: number;
+  symmetric: number;
+}
+
+export const syncWallet = (pin: string | null, scanWindow?: ScanWindow) =>
+  invoke<SyncResult>("sync_wallet", { pin: pin || null, scanWindow: scanWindow ?? null });
 
 // Send a transaction. The backend re-scans for all unspent UTXOs and
 // selects inputs itself, so the UI doesn't need to pass UTXO indices.
@@ -55,6 +64,7 @@ export const sendTransaction = (
   amount: string,
   fee: string,
   acceptLustrations: boolean,
+  scanWindow?: ScanWindow,
 ) =>
   invoke<string>("send_transaction", {
     pin,
@@ -62,6 +72,7 @@ export const sendTransaction = (
     amount,
     fee,
     acceptLustrations,
+    scanWindow: scanWindow ?? null,
   });
 
 // Check if a transaction was mined (by its output addition records)

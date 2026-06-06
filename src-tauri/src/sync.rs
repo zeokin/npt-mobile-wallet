@@ -29,10 +29,35 @@ use neptune_cash::state::wallet::address::announcement_flag::AnnouncementFlag;
 use neptune_cash::state::wallet::address::ReceivingAddress;
 use neptune_cash::state::wallet::address::SpendingKey;
 use neptune_cash::state::wallet::wallet_entropy::WalletEntropy;
+use rayon::prelude::*;
 use serde::Deserialize;
 use serde::Serialize;
 
 use crate::rpc::RpcClient;
+
+/// Per-key-type scan window: how many derivation indices to scan for each key
+/// type. Keeps the scan light by giving the heavy generation (lattice) keys and
+/// the change-only symmetric keys small windows, while the one-per-party
+/// EC-hybrid and viewing types get a full gap-limit look-ahead.
+#[derive(Clone, Copy, Debug, Deserialize)]
+pub(crate) struct ScanWindow {
+    pub(crate) generation: u64,
+    pub(crate) ec_hybrid: u64,
+    pub(crate) viewing_address: u64,
+    pub(crate) symmetric: u64,
+}
+
+impl Default for ScanWindow {
+    fn default() -> Self {
+        // Generous fallback used only if the UI doesn't supply a window.
+        Self {
+            generation: 8,
+            ec_hybrid: 21,
+            viewing_address: 21,
+            symmetric: 1,
+        }
+    }
+}
 
 /// A discovered UTXO with all data needed for display and spending.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -90,17 +115,12 @@ fn check_premine(keys: &[(SpendingKey, u64, String)], network: Network) -> Vec<D
     let mut found = Vec::new();
 
     for (key, key_index, key_type) in keys {
-        // Get the receiving address's lock script hash for this key
-        let addr_lock_hash = match key {
-            SpendingKey::Generation(gsk) => {
-                let addr: ReceivingAddress = gsk.to_address().into();
-                addr.lock_script_hash()
-            }
-            SpendingKey::Symmetric(sk) => {
-                let addr: ReceivingAddress = sk.into();
-                addr.lock_script_hash()
-            }
-        };
+        // Get the receiving address's lock script hash for this key.
+        // `to_address()` covers every SpendingKey variant (Generation,
+        // Symmetric, and the v0.11 EC-hybrid + viewing keys), so no
+        // per-variant match is needed — and `SpendingKey` is now
+        // `#[non_exhaustive]`, which would require a wildcard arm anyway.
+        let addr_lock_hash = key.to_address().lock_script_hash();
 
         for (aocl_leaf_index, utxo) in premine_utxos.iter().enumerate() {
             if utxo.lock_script_hash() != addr_lock_hash {
@@ -142,25 +162,48 @@ fn check_premine(keys: &[(SpendingKey, u64, String)], network: Network) -> Vec<D
 pub(crate) async fn scan_for_utxos(
     rpc: &RpcClient,
     entropy: &WalletEntropy,
-    num_generation_keys: u64,
-    num_symmetric_keys: u64,
+    window: ScanWindow,
 ) -> Result<SyncResult, String> {
-    // Step 1: Derive spending keys and calculate announcement flags
-    let mut keys: Vec<(SpendingKey, u64, String)> = Vec::new();
-    let mut flags: Vec<AnnouncementFlag> = Vec::new();
+    // Step 1: Derive spending keys + announcement flags for every receive key
+    // type, in parallel. Per-type counts keep the scan light: generation is
+    // reusable (few keys) and symmetric is change-only (index 0), while the
+    // one-per-party EC-hybrid and viewing types get a full gap-limit window.
+    // Everything downstream (receiver-id match, decryption, AOCL index,
+    // spent-check) is generic over `SpendingKey`, so listing a key type here is
+    // all that's needed to discover UTXOs received at it. This mirrors
+    // neptune-core / the desktop wallet, which scan across all KeyTypes.
+    let scan_plan: [(KeyType, u64, &str); 4] = [
+        (KeyType::Generation, window.generation, "generation"),
+        (KeyType::EcHybrid, window.ec_hybrid, "ec_hybrid"),
+        (KeyType::ViewingAddress, window.viewing_address, "viewing_address"),
+        (KeyType::Symmetric, window.symmetric, "symmetric"),
+    ];
 
-    for i in 0..num_generation_keys {
-        let sk = SpendingKey::Generation(entropy.nth_generation_spending_key(i));
-        let addr: ReceivingAddress = entropy.nth_receiving_address(i, KeyType::Generation);
-        flags.push(AnnouncementFlag::from(&addr));
-        keys.push((sk, i, "generation".to_string()));
-    }
+    // Flatten to (key_type, index, label) work items and derive them in
+    // parallel across the rayon thread pool — key derivation (especially
+    // EC-hybrid's secp256k1 keygen) is the CPU cost of a scan.
+    let work: Vec<(KeyType, u64, &str)> = scan_plan
+        .iter()
+        .flat_map(|(kt, count, label)| (0..*count).map(move |i| (*kt, i, *label)))
+        .collect();
 
-    for i in 0..num_symmetric_keys {
-        let sk = SpendingKey::Symmetric(entropy.nth_symmetric_key(i));
-        let addr: ReceivingAddress = entropy.nth_receiving_address(i, KeyType::Symmetric);
-        flags.push(AnnouncementFlag::from(&addr));
-        keys.push((sk, i, "symmetric".to_string()));
+    let derived: Vec<(SpendingKey, u64, String, AnnouncementFlag)> = work
+        .par_iter()
+        .map(|(kt, i, label)| {
+            // scan_plan only uses known key types, so this never errors.
+            let sk = crate::keys::nth_spending_key(entropy, *kt, *i)
+                .expect("scan_plan uses only known key types");
+            let addr: ReceivingAddress = entropy.nth_receiving_address(*i, *kt);
+            let flag = AnnouncementFlag::from(&addr);
+            (sk, *i, label.to_string(), flag)
+        })
+        .collect();
+
+    let mut keys: Vec<(SpendingKey, u64, String)> = Vec::with_capacity(derived.len());
+    let mut flags: Vec<AnnouncementFlag> = Vec::with_capacity(derived.len());
+    for (sk, i, label, flag) in derived {
+        keys.push((sk, i, label));
+        flags.push(flag);
     }
 
     if flags.is_empty() {

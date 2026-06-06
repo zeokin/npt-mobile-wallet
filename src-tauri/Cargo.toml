@@ -24,13 +24,18 @@ anyhow = "1"
 itertools = "0.14"
 num-traits = "0.2"
 async-trait = "0.1"
+# Already in the dependency tree (transitive); used to derive scan keys in
+# parallel. Declaring it directly so the scan can call into rayon.
+rayon = "1"
 
 # Neptune-core types for local key derivation and transaction building.
 # This is the critical dependency — gives us SecretKeyMaterial, WalletEntropy,
 # GenerationSpendingKey, ReceivingAddress, etc.
-# Neptune-core v0.10.0 — adds lustration support (hardfork-beta at block 38,000)
-# and verify-lustration-before-accept in supporter's submit_transaction.
-neptune-cash = "0.10.0"
+# Neptune-core v0.11.0 — adds the viewing-address and elliptic-curve-hybrid
+# (EC-hybrid) address formats used for QR receive, and deprecates symmetric
+# addresses. (v0.10.0 added lustration support: hardfork-beta at block 38,000,
+# and verify-lustration-before-accept in supporter's submit_transaction.)
+neptune-cash = "0.11.0"
 
 # Seed management
 bip39 = "2.1"
@@ -41,6 +46,12 @@ sha2 = "0.10"
 argon2 = "0.5"
 zeroize = { version = "1", features = ["derive"] }
 bincode = "1"
+
+# Mobile-only: native camera QR/barcode scanning (used on the Send screen to
+# fill a recipient address). Not available on desktop — the scan command is
+# simply not registered there, and the UI falls back gracefully.
+[target.'cfg(any(target_os = "android", target_os = "ios"))'.dependencies]
+tauri-plugin-barcode-scanner = "2"
 
 # Override leveldb-sys with a stub — we don't use LevelDB in the mobile wallet,
 # but neptune-cash pulls it in transitively. The stub avoids CMake cross-compile issues.

@@ -143,8 +143,25 @@ fn validate_password(pin: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Remove all on-disk per-wallet runtime artifacts and reset the in-memory
+/// pending flag. Called whenever the active wallet changes (create / import /
+/// delete): a different seed is a different wallet, so any pending-transaction
+/// or outgoing-history state from the previous wallet is invalid and must not
+/// leak into the new one (e.g. a stale "pending" banner that disables Send).
+fn reset_wallet_runtime(app: &tauri::AppHandle, state: &State<'_, AppState>) {
+    *state.has_pending_tx.lock().unwrap() = false;
+    if let Ok(dir) = app.path().app_data_dir() {
+        let _ = std::fs::remove_file(dir.join("pending_tx.json"));
+        let _ = std::fs::remove_file(dir.join("outgoing_history.json"));
+    }
+}
+
 #[tauri::command]
-fn create_wallet(app: tauri::AppHandle, pin: String) -> Result<Vec<String>, String> {
+fn create_wallet(
+    app: tauri::AppHandle,
+    pin: String,
+    state: State<'_, AppState>,
+) -> Result<Vec<String>, String> {
     validate_password(&pin)?;
     let path = seed::seed_file_path(&app)?;
     if seed::seed_exists(&path) {
@@ -154,18 +171,39 @@ fn create_wallet(app: tauri::AppHandle, pin: String) -> Result<Vec<String>, Stri
     let entropy = seed::mnemonic_to_entropy(&mnemonic);
     let encrypted = seed::encrypt_seed(&entropy, &pin)?;
     seed::save_seed_file(&path, &encrypted)?;
+    // New wallet → wipe any leftover runtime state from a previous one.
+    reset_wallet_runtime(&app, &state);
     let words: Vec<String> = mnemonic.words().map(|w| w.to_string()).collect();
     Ok(words)
 }
 
 #[tauri::command]
-fn import_wallet(app: tauri::AppHandle, words: String, pin: String) -> Result<(), String> {
+fn import_wallet(
+    app: tauri::AppHandle,
+    words: String,
+    pin: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
     validate_password(&pin)?;
     let path = seed::seed_file_path(&app)?;
     let mnemonic = seed::validate_mnemonic(&words)?;
     let entropy = seed::mnemonic_to_entropy(&mnemonic);
     let encrypted = seed::encrypt_seed(&entropy, &pin)?;
     seed::save_seed_file(&path, &encrypted)?;
+
+    // A different seed is a different wallet: wipe the previous wallet's
+    // pending-transaction and outgoing-history state so it can't block or
+    // mislead the new one.
+    reset_wallet_runtime(&app, &state);
+
+    // Establish a fresh unlocked session bound to the NEW PIN, so address
+    // derivation and sync use the imported wallet's key — not a PIN cached from
+    // a previously-unlocked wallet.
+    *state.wallet_unlocked.lock().unwrap() = true;
+    set_cached_pin(&state, Some(pin));
+    *state.failed_pin_attempts.lock().unwrap() = 0;
+    *state.lockout_until.lock().unwrap() = None;
+    touch_session(&state);
     Ok(())
 }
 
@@ -256,9 +294,15 @@ fn export_seed_phrase(app: tauri::AppHandle, pin: String) -> Result<Vec<String>,
 }
 
 #[tauri::command]
-fn delete_wallet(app: tauri::AppHandle) -> Result<(), String> {
+fn delete_wallet(app: tauri::AppHandle, state: State<'_, AppState>) -> Result<(), String> {
     let path = seed::seed_file_path(&app)?;
-    seed::delete_seed_file(&path)
+    seed::delete_seed_file(&path)?;
+    // Wipe runtime state and log out — no wallet is active anymore.
+    reset_wallet_runtime(&app, &state);
+    *state.wallet_unlocked.lock().unwrap() = false;
+    set_cached_pin(&state, None);
+    *state.last_activity.lock().unwrap() = None;
+    Ok(())
 }
 
 // ── Local Key Derivation Commands ───────────────────────────────
@@ -319,6 +363,7 @@ async fn send_transaction(
     amount: String,
     fee: String,
     accept_lustrations: Option<bool>,
+    scan_window: Option<sync::ScanWindow>,
     state: State<'_, AppState>,
 ) -> Result<String, String> {
     check_session(&state)?;
@@ -370,9 +415,11 @@ async fn send_transaction(
     )
     .map_err(|e| format!("Invalid address: {}", e))?;
 
-    // Step 1: Re-scan to get fresh UTXOs with spending data
+    // Step 1: Re-scan to get fresh UTXOs with spending data. Use the same
+    // per-type window the UI scanned, so funds received at a freshly generated
+    // (higher-index) address remain spendable.
     debug_log!("[SEND] Step 1: Scanning for UTXOs...");
-    let sync_result = sync::scan_for_utxos(&rpc, &entropy, 5, 1).await?;
+    let sync_result = sync::scan_for_utxos(&rpc, &entropy, scan_window.unwrap_or_default()).await?;
     let unspent_utxos: Vec<_> = sync_result
         .utxos
         .iter()
@@ -539,15 +586,11 @@ async fn send_transaction(
             )
             .ok_or(format!("Extract proof failed for input {}", idx))?;
 
-        let spending_key = if input.data.key_type == "generation" {
-            neptune_cash::state::wallet::address::SpendingKey::Generation(
-                entropy.nth_generation_spending_key(input.data.key_index),
-            )
-        } else {
-            neptune_cash::state::wallet::address::SpendingKey::Symmetric(
-                entropy.nth_symmetric_key(input.data.key_index),
-            )
-        };
+        // Reconstruct the unlocking key from the UTXO's stored key type +
+        // index. Covers all key types (generation, symmetric, EC-hybrid,
+        // viewing), so UTXOs received at the new address formats can be spent.
+        let spending_key =
+            keys::spending_key_for(&entropy, &input.data.key_type, input.data.key_index)?;
 
         unlocked_utxos.push(UnlockedUtxo::unlock(
             input.utxo.clone(),
@@ -880,7 +923,7 @@ fn clear_pending_tx(app: tauri::AppHandle, state: State<'_, AppState>) {
 async fn sync_wallet(
     app: tauri::AppHandle,
     pin: Option<String>,
-    num_keys: Option<u64>,
+    scan_window: Option<sync::ScanWindow>,
     state: State<'_, AppState>,
 ) -> Result<sync::SyncResult, String> {
     check_session(&state)?;
@@ -891,8 +934,7 @@ async fn sync_wallet(
         return Err("PIN required".to_string());
     }
     let entropy = get_wallet_entropy(&app, &actual_pin)?;
-    let key_count = num_keys.unwrap_or(5); // scan first 5 addresses by default
-    sync::scan_for_utxos(&rpc, &entropy, key_count, 1).await
+    sync::scan_for_utxos(&rpc, &entropy, scan_window.unwrap_or_default()).await
 }
 
 // ── Supporter Connection Commands ────────────────────────────
@@ -961,6 +1003,15 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_safe_area_insets_css::init())
+        .setup(|_app| {
+            // Native camera QR scanner — mobile only. On desktop the plugin is
+            // not registered (the crate isn't even compiled there), so the
+            // `scan` command errors and the Send screen falls back gracefully.
+            #[cfg(mobile)]
+            _app.handle()
+                .plugin(tauri_plugin_barcode_scanner::init())?;
+            Ok(())
+        })
         .manage(AppState {
             rpc: Mutex::new(None),
             wallet_unlocked: Mutex::new(false),
