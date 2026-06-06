@@ -59,6 +59,21 @@ tauri-plugin-barcode-scanner = "2"
 leveldb-sys = { path = "../leveldb-sys" }
 systemstat = { path = "../systemstat-stub" }
 
+# triton-vm's build script (build.rs) does heavy recursive codegen
+# (Constraints::all → degree lowering → syn/prettyplease over huge expression
+# trees) and overflows the Windows main-thread stack (1 MB) when built at
+# opt-level 0 — e.g. `tauri android` / `cargo build` dies with
+# STATUS_STACK_OVERFLOW (0xc00000fd). When cross-compiling (--target), Cargo
+# does NOT forward rustflags/link-args to host build scripts, so a linker
+# /STACK bump can't reach it — but `build-override` (which governs build
+# scripts + proc-macros) DOES apply. Optimizing them shrinks stack frames
+# enough to fit, on both native and cross builds.
+[profile.dev.build-override]
+opt-level = 3
+
+[profile.release.build-override]
+opt-level = 3
+
 # Optimize triton-vm aggressively in all profiles to prevent stack overflows
 [profile.dev.package.triton-vm]
 opt-level = 3
