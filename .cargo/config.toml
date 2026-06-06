@@ -5,3 +5,21 @@
 # shell. `force = true` overrides shell-side env so a stale lower value in
 # a developer's profile can't silently break the build.
 RUST_MIN_STACK = { value = "33554432", force = true }
+
+# triton-vm's build script (build.rs) generates its constraint-evaluation code
+# entirely on its MAIN thread (Constraints::all → degree lowering → syn /
+# prettyplease codegen over huge recursive expression trees). On Windows the
+# main-thread stack is the linker's reserve — 1 MB by default — and it overflows
+# (STATUS_STACK_OVERFLOW, 0xc00000fd), failing `cargo build` / `tauri android`.
+#
+# RUST_MIN_STACK only sizes std::thread-SPAWNED threads, not a process's main
+# thread, so it cannot fix this. Instead raise the linker stack reserve to 64 MB
+# for HOST (Windows) artifacts — build scripts compile for the host triple, so
+# these rustflags apply to them. The Android / Linux target crates use a
+# different linker and are unaffected. (32 MB is usually enough; 64 MB is
+# headroom.)
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "link-arg=/STACK:67108864"]
+
+[target.x86_64-pc-windows-gnu]
+rustflags = ["-C", "link-arg=-Wl,--stack,67108864"]
