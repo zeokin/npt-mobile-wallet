@@ -1,0 +1,119 @@
+name: CI
+
+# Runs on every PR and every push to main/security branches.
+# Verifies the codebase compiles cleanly for Android, passes type-checks,
+# and is properly formatted — before anything reaches a release.
+
+on:
+  push:
+    branches: [main, security]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Build + lint (Android)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    # neptune-cash has very deep macro expansions (the RpcApi blanket impl)
+    # that exceed rustc's default thread stack on GitHub runners. Bump it.
+    env:
+      RUST_MIN_STACK: 16777216
+    steps:
+      - uses: actions/checkout@v4
+
+      # GitHub runners only have ~14 GB free disk. Our Tauri build
+      # produces large LTO archives for two Android targets, which
+      # easily fills the root filesystem. Remove preinstalled tools
+      # we don't need (.NET, Haskell, CodeQL, etc.) to free ~25 GB.
+      - name: Free disk space
+        uses: jlumbroso/free-disk-space@main
+        with:
+          tool-cache: false
+          android: false
+          dotnet: true
+          haskell: true
+          large-packages: true
+          docker-images: true
+          swap-storage: true
+
+      # GitHub runners have only 7 GB RAM; our release profile uses
+      # `codegen-units = 1` + LTO which spikes memory during linking.
+      # Add swap so the build doesn't OOM.
+      - name: Add swap space
+        # GitHub runners ship with /swapfile already mounted (4 GB).
+        # Disable it and replace with a 10 GB one so LTO linking has room.
+        run: |
+          sudo swapoff /swapfile || true
+          sudo rm -f /swapfile
+          sudo fallocate -l 10G /swapfile
+          sudo chmod 600 /swapfile
+          sudo mkswap /swapfile
+          sudo swapon /swapfile
+          free -h
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Setup JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: 'aarch64-linux-android,x86_64-linux-android'
+          components: 'rustfmt'
+
+      - name: Cache Rust build
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: './src-tauri -> target'
+
+      # The generated Android Gradle project invokes `cargo tauri` as a
+      # subcommand when building per-ABI Rust libs. That requires the
+      # tauri-cli Cargo subcommand to be on PATH — the npm package alone
+      # is not enough. Install a prebuilt binary (fast).
+      - name: Install cargo-tauri CLI
+        uses: taiki-e/install-action@v2
+        with:
+          tool: tauri-cli@2
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android NDK
+        run: echo "y" | sdkmanager "ndk;27.0.12077973" > /dev/null
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: Check Rust formatting
+        working-directory: src-tauri
+        run: cargo fmt --check
+
+      - name: Type-check frontend
+        run: npx tsc --noEmit
+
+      - name: Build Android APK (unsigned)
+        env:
+          NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/27.0.12077973
+        # --apk skips the AAB build. The AAB rebuild uses different
+        # feature flags, so cargo treats it as a fresh config and
+        # duplicates the target dir, filling the runner's disk.
+        run: npx @tauri-apps/cli android build --apk --target aarch64 --target x86_64
+
+      - name: Upload unsigned APK as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: npt-wallet-unsigned-${{ github.sha }}
+          path: src-tauri/gen/android/app/build/outputs/apk/universal/release/app-universal-release-unsigned.apk
+          retention-days: 7

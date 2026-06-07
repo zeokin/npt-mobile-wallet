@@ -17,12 +17,16 @@ mod seed;
 mod sync;
 mod transaction;
 
-use rpc::RpcClient;
-use serde::Serialize;
 use std::sync::Mutex;
 use std::time::Instant;
-use tauri::{Manager, State};
+
+use rpc::RpcClient;
+use serde::Serialize;
+use tauri::Manager;
+use tauri::State;
 use zeroize::Zeroize;
+
+use crate::seed::is_v2_format;
 
 /// Session auto-lock after 3 minutes of inactivity.
 const SESSION_TIMEOUT_SECS: u64 = 180;
@@ -48,6 +52,12 @@ struct AppState {
     /// True while a submitted transaction is waiting to be mined.
     /// Blocks additional sends to prevent double-spending.
     has_pending_tx: Mutex<bool>,
+    /// True while a long-running authenticated operation is in progress
+    /// (currently: send_transaction, whose proof generation can take several
+    /// minutes). While set, `check_session` skips the idle-timeout check so
+    /// the UI isn't kicked to the unlock screen mid-send. The flag is always
+    /// cleared on return from the operation.
+    work_in_progress: Mutex<bool>,
 }
 
 #[derive(Serialize)]
@@ -67,6 +77,13 @@ fn check_session(state: &State<'_, AppState>) -> Result<(), String> {
     if !unlocked {
         return Err("Wallet is locked".to_string());
     }
+    // A long-running authenticated operation (e.g. STARK proof generation in
+    // send_transaction) may run for several minutes without user interaction.
+    // Treat the session as valid during that window so the UI isn't kicked
+    // to the unlock screen mid-send.
+    if *state.work_in_progress.lock().unwrap() {
+        return Ok(());
+    }
     if let Some(last) = *state.last_activity.lock().unwrap() {
         if last.elapsed().as_secs() > SESSION_TIMEOUT_SECS {
             *state.wallet_unlocked.lock().unwrap() = false;
@@ -84,6 +101,35 @@ fn set_cached_pin(state: &State<'_, AppState>, new_pin: Option<String>) {
         old.zeroize();
     }
     *guard = new_pin;
+}
+
+/// RAII guard: sets `work_in_progress = true` on creation, clears it on drop.
+/// Guarantees the flag is cleared on every return path, including `?`-returns.
+///
+/// On drop it also resets the session activity timer, so the inactivity
+/// timeout is measured from the END of the long-running operation (e.g.
+/// multi-minute proof building) rather than its start — otherwise the screen
+/// would lock the instant the build finishes.
+struct WorkInProgressGuard<'a> {
+    flag: &'a Mutex<bool>,
+    last_activity: &'a Mutex<Option<Instant>>,
+}
+
+impl<'a> WorkInProgressGuard<'a> {
+    fn new(flag: &'a Mutex<bool>, last_activity: &'a Mutex<Option<Instant>>) -> Self {
+        *flag.lock().unwrap() = true;
+        Self {
+            flag,
+            last_activity,
+        }
+    }
+}
+
+impl<'a> Drop for WorkInProgressGuard<'a> {
+    fn drop(&mut self) {
+        *self.flag.lock().unwrap() = false;
+        *self.last_activity.lock().unwrap() = Some(Instant::now());
+    }
 }
 
 // ── Seed / Wallet Commands ───────────────────────────────────
@@ -107,8 +153,25 @@ fn validate_password(pin: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Remove all on-disk per-wallet runtime artifacts and reset the in-memory
+/// pending flag. Called whenever the active wallet changes (create / import /
+/// delete): a different seed is a different wallet, so any pending-transaction
+/// or outgoing-history state from the previous wallet is invalid and must not
+/// leak into the new one (e.g. a stale "pending" banner that disables Send).
+fn reset_wallet_runtime(app: &tauri::AppHandle, state: &State<'_, AppState>) {
+    *state.has_pending_tx.lock().unwrap() = false;
+    if let Ok(dir) = app.path().app_data_dir() {
+        let _ = std::fs::remove_file(dir.join("pending_tx.json"));
+        let _ = std::fs::remove_file(dir.join("outgoing_history.json"));
+    }
+}
+
 #[tauri::command]
-fn create_wallet(app: tauri::AppHandle, pin: String) -> Result<Vec<String>, String> {
+fn create_wallet(
+    app: tauri::AppHandle,
+    pin: String,
+    state: State<'_, AppState>,
+) -> Result<Vec<String>, String> {
     validate_password(&pin)?;
     let path = seed::seed_file_path(&app)?;
     if seed::seed_exists(&path) {
@@ -118,18 +181,39 @@ fn create_wallet(app: tauri::AppHandle, pin: String) -> Result<Vec<String>, Stri
     let entropy = seed::mnemonic_to_entropy(&mnemonic);
     let encrypted = seed::encrypt_seed(&entropy, &pin)?;
     seed::save_seed_file(&path, &encrypted)?;
+    // New wallet → wipe any leftover runtime state from a previous one.
+    reset_wallet_runtime(&app, &state);
     let words: Vec<String> = mnemonic.words().map(|w| w.to_string()).collect();
     Ok(words)
 }
 
 #[tauri::command]
-fn import_wallet(app: tauri::AppHandle, words: String, pin: String) -> Result<(), String> {
+fn import_wallet(
+    app: tauri::AppHandle,
+    words: String,
+    pin: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
     validate_password(&pin)?;
     let path = seed::seed_file_path(&app)?;
     let mnemonic = seed::validate_mnemonic(&words)?;
     let entropy = seed::mnemonic_to_entropy(&mnemonic);
     let encrypted = seed::encrypt_seed(&entropy, &pin)?;
     seed::save_seed_file(&path, &encrypted)?;
+
+    // A different seed is a different wallet: wipe the previous wallet's
+    // pending-transaction and outgoing-history state so it can't block or
+    // mislead the new one.
+    reset_wallet_runtime(&app, &state);
+
+    // Establish a fresh unlocked session bound to the NEW PIN, so address
+    // derivation and sync use the imported wallet's key — not a PIN cached from
+    // a previously-unlocked wallet.
+    *state.wallet_unlocked.lock().unwrap() = true;
+    set_cached_pin(&state, Some(pin));
+    *state.failed_pin_attempts.lock().unwrap() = 0;
+    *state.lockout_until.lock().unwrap() = None;
+    touch_session(&state);
     Ok(())
 }
 
@@ -162,7 +246,7 @@ fn unlock_wallet(
             *state.lockout_until.lock().unwrap() = None;
 
             // Auto-migrate v1 (SHA-256) seed files to v2 (Argon2id) on unlock
-            if !encrypted.starts_with(b"NPT\x00") {
+            if !is_v2_format(&encrypted) {
                 seed::migrate_v1_to_v2(&path, &entropy, &pin)?;
             }
 
@@ -220,9 +304,15 @@ fn export_seed_phrase(app: tauri::AppHandle, pin: String) -> Result<Vec<String>,
 }
 
 #[tauri::command]
-fn delete_wallet(app: tauri::AppHandle) -> Result<(), String> {
+fn delete_wallet(app: tauri::AppHandle, state: State<'_, AppState>) -> Result<(), String> {
     let path = seed::seed_file_path(&app)?;
-    seed::delete_seed_file(&path)
+    seed::delete_seed_file(&path)?;
+    // Wipe runtime state and log out — no wallet is active anymore.
+    reset_wallet_runtime(&app, &state);
+    *state.wallet_unlocked.lock().unwrap() = false;
+    set_cached_pin(&state, None);
+    *state.last_activity.lock().unwrap() = None;
+    Ok(())
 }
 
 // ── Local Key Derivation Commands ───────────────────────────────
@@ -262,13 +352,58 @@ fn generate_local_address(
     keys::derive_receiving_address(&entropy, index, kt, net)
 }
 
+/// The one main receiving address of each type (index 0), shown on the wallet.
+#[derive(Serialize)]
+struct MainAddresses {
+    generation: String,
+    ec_hybrid: String,
+    viewing_address: String,
+}
+
+/// Derive the wallet's three main addresses (generation, EC-hybrid, viewing —
+/// all at index 0) in one call. Run on the blocking pool because seed
+/// decryption (argon2) and the generation-address lattice keygen are heavy:
+/// doing them on the main thread froze the UI. Called once on unlock/import so
+/// the wallet can show addresses instantly from cache afterwards.
+#[tauri::command]
+async fn generate_main_addresses(
+    app: tauri::AppHandle,
+    pin: Option<String>,
+    network: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<MainAddresses, String> {
+    check_session(&state)?;
+    let actual_pin = pin.unwrap_or_else(|| get_cached_pin(&state).unwrap_or_default());
+    if actual_pin.is_empty() {
+        return Err("PIN required".to_string());
+    }
+    let net = network.unwrap_or_else(|| "mainnet".to_string());
+
+    tokio::task::spawn_blocking(move || -> Result<MainAddresses, String> {
+        let entropy = get_wallet_entropy(&app, &actual_pin)?;
+        Ok(MainAddresses {
+            generation: keys::derive_receiving_address(&entropy, 0, "generation", &net)?,
+            ec_hybrid: keys::derive_receiving_address(&entropy, 0, "ec_hybrid", &net)?,
+            viewing_address: keys::derive_receiving_address(&entropy, 0, "viewing_address", &net)?,
+        })
+    })
+    .await
+    .map_err(|e| format!("Address generation task failed: {e}"))?
+}
+
 /// Send NPT: build transaction locally and submit to supporter.
 /// This is the complete send pipeline:
 /// 1. Get chain tip (mutator set accumulator)
 /// 2. Select input UTXOs
 /// 3. Build TransactionDetails with on-chain notifications
-/// 4. Generate ProofCollection (STARK proofs — may take minutes)
-/// 5. Submit via wallet_submitTransaction
+/// 4. If post-HF-β, attach lustration announcements (requires user opt-in)
+/// 5. Generate ProofCollection (STARK proofs — may take minutes)
+/// 6. Submit via wallet_submitTransaction
+///
+/// `accept_lustrations`: if any input falls under the lustration barrier
+/// (HF-β at block 38,000), the user must confirm before the tx is built.
+/// When required-but-not-accepted, returns an error prefixed
+/// `LUSTRATION_REQUIRED:<threshold>` so the UI can prompt and retry.
 #[tauri::command]
 async fn send_transaction(
     app: tauri::AppHandle,
@@ -276,11 +411,17 @@ async fn send_transaction(
     recipient_address: String,
     amount: String,
     fee: String,
-    utxo_indices: Vec<usize>, // indices into the stored UTXOs to spend
+    accept_lustrations: Option<bool>,
+    scan_window: Option<sync::ScanWindow>,
     state: State<'_, AppState>,
 ) -> Result<String, String> {
     check_session(&state)?;
     touch_session(&state);
+
+    // Mark this as a long-running operation so the session timer doesn't
+    // expire during proof generation (which can take several minutes).
+    // The guard is dropped automatically on every return path.
+    let _work_guard = WorkInProgressGuard::new(&state.work_in_progress, &state.last_activity);
 
     // Block sending while a previous transaction is pending (prevents double-spend)
     // Check both in-memory flag and disk file (handles app restart)
@@ -323,9 +464,11 @@ async fn send_transaction(
     )
     .map_err(|e| format!("Invalid address: {}", e))?;
 
-    // Step 1: Re-scan to get fresh UTXOs with spending data
+    // Step 1: Re-scan to get fresh UTXOs with spending data. Use the same
+    // per-type window the UI scanned, so funds received at a freshly generated
+    // (higher-index) address remain spendable.
     debug_log!("[SEND] Step 1: Scanning for UTXOs...");
-    let sync_result = sync::scan_for_utxos(&rpc, &entropy, 5, 1).await?;
+    let sync_result = sync::scan_for_utxos(&rpc, &entropy, scan_window.unwrap_or_default()).await?;
     let unspent_utxos: Vec<_> = sync_result
         .utxos
         .iter()
@@ -340,13 +483,13 @@ async fn send_transaction(
     use neptune_cash::prelude::triton_vm::prelude::Tip5;
     use neptune_cash::prelude::twenty_first::util_types::mmr::mmr_trait::Mmr;
     use neptune_cash::protocol::consensus::block::block_height::BlockHeight;
-    use neptune_cash::protocol::consensus::block::block_kernel::BlockKernel;
-    use neptune_cash::protocol::proof_abstractions::mast_hash::MastHash;
     use neptune_cash::protocol::proof_abstractions::timestamp::Timestamp;
     use neptune_cash::state::wallet::transaction_output::TxOutput;
     use neptune_cash::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
     use neptune_cash::util_types::mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
-    use num_traits::{CheckedAdd, CheckedSub, Zero};
+    use num_traits::CheckedAdd;
+    use num_traits::CheckedSub;
+    use num_traits::Zero;
 
     let total_needed = amount_val
         .checked_add(&fee_val)
@@ -360,26 +503,24 @@ async fn send_transaction(
         utxo: neptune_cash::protocol::consensus::transaction::utxo::Utxo,
         sender_randomness: neptune_cash::prelude::triton_vm::prelude::Digest,
         receiver_preimage: neptune_cash::prelude::triton_vm::prelude::Digest,
+        aocl_leaf_index: u64,
         amount: neptune_cash::api::export::NativeCurrencyAmount,
         data: sync::DiscoveredUtxo,
     }
 
     let mut all_inputs: Vec<UtxoInput> = Vec::new();
     for u in &unspent_utxos {
-        let utxo_bytes = hex::decode(&u.utxo_hex).map_err(|e| format!("Decode: {}", e))?;
-        let utxo: neptune_cash::protocol::consensus::transaction::utxo::Utxo =
-            bincode::deserialize(&utxo_bytes).map_err(|e| format!("Deserialize: {}", e))?;
-        let sr_bytes =
-            hex::decode(&u.sender_randomness_hex).map_err(|e| format!("Decode SR: {}", e))?;
-        let sr = bincode::deserialize(&sr_bytes).map_err(|e| format!("Deserialize SR: {}", e))?;
-        let rp_bytes =
-            hex::decode(&u.receiver_preimage_hex).map_err(|e| format!("Decode RP: {}", e))?;
-        let rp = bincode::deserialize(&rp_bytes).map_err(|e| format!("Deserialize RP: {}", e))?;
+        let utxo = &u.utxo;
         let amount = utxo.get_native_currency_amount();
+        let sender_randomness = u.sender_randomness;
+        let receiver_preimage = u.receiver_preimage;
+        let aocl_leaf_index = u.aocl_leaf_index.ok_or("Missing AOCL leaf index")?;
+
         all_inputs.push(UtxoInput {
-            utxo,
-            sender_randomness: sr,
-            receiver_preimage: rp,
+            utxo: utxo.to_owned(),
+            sender_randomness,
+            receiver_preimage,
+            aocl_leaf_index,
             amount,
             data: (*u).clone(),
         });
@@ -435,34 +576,9 @@ async fn send_transaction(
     let tip_height = u64::from(tip_resp.block.kernel.header.height);
     debug_log!("[SEND] Chain tip at height {}", tip_height);
 
-    // Helper: fetch one block from the supporter and return its kernel + hash.
-    async fn fetch_block(
-        rpc: &RpcClient,
-        height: u64,
-    ) -> Result<
-        (
-            BlockKernel,
-            neptune_cash::prelude::triton_vm::prelude::Digest,
-        ),
-        String,
-    > {
-        use neptune_cash::application::json_rpc::core::api::rpc::RpcApi;
-        use neptune_cash::protocol::consensus::block::block_height::BlockHeight;
-        let bh = BlockHeight::from(height);
-        let resp = rpc
-            .get_blocks(bh, bh)
-            .await
-            .map_err(|e| format!("get_blocks: {}", e))?;
-        let block = resp.blocks.into_iter().next().ok_or("No block")?;
-        let hash = block.hash();
-        let kernel: BlockKernel = block.kernel.into();
-        Ok((kernel, hash))
-    }
-
     // Step 4-7: For EACH selected UTXO: compute AOCL index, get membership proof, unlock
     debug_log!("[SEND] Steps 4-7: Processing {} inputs...", selected.len());
     let mut all_abs_index_sets = Vec::new();
-    let mut all_aocl_indices = Vec::new();
 
     // Compute AOCL index and AbsoluteIndexSet for each input
     for (idx, input) in selected.iter().enumerate() {
@@ -474,62 +590,10 @@ async fn send_transaction(
             input.amount
         );
 
-        // Get previous block AOCL count.
-        // For genesis block (height 0): AOCL starts empty, so prev_aocl = 0.
-        let prev_aocl = if block_height == 0 {
-            0u64
-        } else {
-            let (prev_kernel, prev_hash) = fetch_block(&rpc, block_height - 1).await?;
-            let prev_gf = prev_kernel
-                .guesser_fee_addition_records(prev_hash)
-                .map_err(|e| format!("Guesser fees: {}", e))?;
-            let prev_msa = prev_kernel.body.mutator_set_accumulator_after(prev_gf);
-            prev_msa.aocl.num_leafs()
-        };
-
-        // Get block additions.
-        // For genesis block (height 0): fetch locally since supporter may not serve it via RPC.
-        let all_additions = if block_height == 0 {
-            use neptune_cash::application::config::network::Network;
-            use neptune_cash::protocol::consensus::block::Block;
-            let genesis = Block::genesis(Network::Main);
-            let genesis_hash = genesis.hash();
-            genesis
-                .kernel
-                .all_addition_records(genesis_hash)
-                .map_err(|e| format!("Genesis addition records: {}", e))?
-        } else {
-            let (kernel, hash) = fetch_block(&rpc, block_height).await?;
-            kernel
-                .all_addition_records(hash)
-                .map_err(|e| format!("Addition records: {}", e))?
-        };
-
         // Find our commitment
         let utxo_hash = Tip5::hash(&input.utxo);
-        let receiver_digest = input.receiver_preimage.hash();
-        let commitment = neptune_cash::util_types::mutator_set::commit(
-            utxo_hash,
-            input.sender_randomness,
-            receiver_digest,
-        );
-
-        let position = all_additions
-            .iter()
-            .position(|a| a.canonical_commitment == commitment.canonical_commitment)
-            .ok_or(format!(
-                "UTXO not found in block {} additions",
-                block_height
-            ))?;
-
-        let aocl_idx = prev_aocl + position as u64;
-        debug_log!(
-            "[SEND] Input {}: AOCL index {} (prev {} + pos {})",
-            idx,
-            aocl_idx,
-            prev_aocl,
-            position
-        );
+        let aocl_idx = input.aocl_leaf_index;
+        debug_log!("[SEND] Input {}: AOCL index {}", idx, aocl_idx,);
 
         let abs_set = AbsoluteIndexSet::compute(
             utxo_hash,
@@ -538,7 +602,6 @@ async fn send_transaction(
             aocl_idx,
         );
         all_abs_index_sets.push(abs_set);
-        all_aocl_indices.push(aocl_idx);
     }
 
     // Batch restore membership proofs for ALL inputs
@@ -566,21 +629,17 @@ async fn send_transaction(
     {
         let membership_proof = proof_data
             .extract_ms_membership_proof(
-                all_aocl_indices[idx],
+                input.aocl_leaf_index,
                 input.sender_randomness,
                 input.receiver_preimage,
             )
             .ok_or(format!("Extract proof failed for input {}", idx))?;
 
-        let spending_key = if input.data.key_type == "generation" {
-            neptune_cash::state::wallet::address::SpendingKey::Generation(
-                entropy.nth_generation_spending_key(input.data.key_index),
-            )
-        } else {
-            neptune_cash::state::wallet::address::SpendingKey::Symmetric(
-                entropy.nth_symmetric_key(input.data.key_index),
-            )
-        };
+        // Reconstruct the unlocking key from the UTXO's stored key type +
+        // index. Covers all key types (generation, symmetric, EC-hybrid,
+        // viewing), so UTXOs received at the new address formats can be spent.
+        let spending_key =
+            keys::spending_key_for(&entropy, &input.data.key_type, input.data.key_index)?;
 
         unlocked_utxos.push(UnlockedUtxo::unlock(
             input.utxo.clone(),
@@ -625,17 +684,47 @@ async fn send_transaction(
     }
     debug_log!("[SEND] {} outputs created", tx_outputs.len());
 
+    // Step 8.5: Lustration check (HF-β at block 38,000).
+    // If the chain has a lustration barrier and any of our inputs fall at
+    // or below the threshold, the supporter will reject the tx unless it
+    // carries lustration announcements. Generate them while we still hold
+    // a borrow of unlocked_utxos (it's moved into new_without_coinbase next).
+    use neptune_cash::api::export::Announcement;
+    use neptune_cash::protocol::consensus::block::block_header::BlockPow;
+    let pow: BlockPow = tip_resp.block.kernel.header.pow.into();
+    let lustration_status_result = pow.lustration_status();
+    let lustration_announcements: Vec<Announcement> = match lustration_status_result {
+        Ok(status) => Announcement::lustration_announcements(status, &unlocked_utxos),
+        Err(_) => vec![], // pre-HF-β chain, no lustration field
+    };
+    if !lustration_announcements.is_empty() && !accept_lustrations.unwrap_or(false) {
+        let status = lustration_status_result
+            .expect("lustration_status must be Ok since we generated announcements");
+        return Err(format!(
+            "LUSTRATION_REQUIRED:{}",
+            status.max_lustrating_aocl_leaf_index
+        ));
+    }
+
     // Step 9: Build TransactionDetails
     debug_log!("[SEND] Step 9: Building TransactionDetails...");
     let timestamp = Timestamp::now();
-    let transaction_details = neptune_cash::api::export::TransactionDetails::new_without_coinbase(
-        unlocked_utxos,
-        tx_outputs,
-        fee_val,
-        timestamp,
-        tip_msa,
-        network,
-    );
+    let mut transaction_details =
+        neptune_cash::api::export::TransactionDetails::new_without_coinbase(
+            unlocked_utxos,
+            tx_outputs,
+            fee_val,
+            timestamp,
+            tip_msa,
+            network,
+        );
+    if !lustration_announcements.is_empty() {
+        debug_log!(
+            "[SEND] Attaching {} lustration announcement(s)",
+            lustration_announcements.len()
+        );
+        transaction_details = transaction_details.with_announcements(lustration_announcements);
+    }
     debug_log!(
         "[SEND] TransactionDetails built ({} inputs)",
         selected.len()
@@ -660,7 +749,7 @@ async fn send_transaction(
                     "Membership proof validation failed for input {}. \
                      AOCL index: {}, MSA AOCL leafs: {}.",
                     idx,
-                    all_aocl_indices[idx],
+                    input.aocl_leaf_index,
                     msa.aocl.num_leafs()
                 ));
             }
@@ -883,7 +972,7 @@ fn clear_pending_tx(app: tauri::AppHandle, state: State<'_, AppState>) {
 async fn sync_wallet(
     app: tauri::AppHandle,
     pin: Option<String>,
-    num_keys: Option<u64>,
+    scan_window: Option<sync::ScanWindow>,
     state: State<'_, AppState>,
 ) -> Result<sync::SyncResult, String> {
     check_session(&state)?;
@@ -894,8 +983,7 @@ async fn sync_wallet(
         return Err("PIN required".to_string());
     }
     let entropy = get_wallet_entropy(&app, &actual_pin)?;
-    let key_count = num_keys.unwrap_or(5); // scan first 5 addresses by default
-    sync::scan_for_utxos(&rpc, &entropy, key_count, 1).await
+    sync::scan_for_utxos(&rpc, &entropy, scan_window.unwrap_or_default()).await
 }
 
 // ── Supporter Connection Commands ────────────────────────────
@@ -964,6 +1052,15 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_safe_area_insets_css::init())
+        .setup(|_app| {
+            // Native camera QR scanner — mobile only. On desktop the plugin is
+            // not registered (the crate isn't even compiled there), so the
+            // `scan` command errors and the Send screen falls back gracefully.
+            #[cfg(mobile)]
+            _app.handle()
+                .plugin(tauri_plugin_barcode_scanner::init())?;
+            Ok(())
+        })
         .manage(AppState {
             rpc: Mutex::new(None),
             wallet_unlocked: Mutex::new(false),
@@ -972,6 +1069,7 @@ pub fn run() {
             failed_pin_attempts: Mutex::new(0),
             lockout_until: Mutex::new(None),
             has_pending_tx: Mutex::new(false),
+            work_in_progress: Mutex::new(false),
         })
         .invoke_handler(tauri::generate_handler![
             // Wallet
@@ -986,6 +1084,7 @@ pub fn run() {
             delete_wallet,
             // Local key derivation
             generate_local_address,
+            generate_main_addresses,
             // UTXO scanning + sending
             sync_wallet,
             send_transaction,

@@ -1,3 +1,7 @@
-[target.x86_64-linux-android]
-linker = "C:\\Users\\Uni\\AppData\\Local\\Android\\Sdk\\ndk\\30.0.14904198\\toolchains\\llvm\\prebuilt\\windows-x86_64\\bin\\x86_64-linux-android24-clang.cmd"
-ar = "C:\\Users\\Uni\\AppData\\Local\\Android\\Sdk\\ndk\\30.0.14904198\\toolchains\\llvm\\prebuilt\\windows-x86_64\\bin\\llvm-ar.exe"
+[env]
+# rustc overflows its default 8 MB stack when type-checking neptune-cash
+# 0.10+ on stable. Bump to 32 MB so any cargo invocation in this workspace
+# (build, check, tauri, etc.) succeeds without needing the variable in the
+# shell. `force = true` overrides shell-side env so a stale lower value in
+# a developer's profile can't silently break the build.
+RUST_MIN_STACK = { value = "33554432", force = true }

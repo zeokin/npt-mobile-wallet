@@ -112,7 +112,8 @@ export default function SeedCreateScreen() {
     if (quizIndex + 1 >= TOTAL_QUESTIONS) {
       useWalletStore.getState().reset();
       toast.success("Wallet created successfully!");
-      navigate("/wallet", { replace: true, state: { freshUnlock: true } });
+      // Same as import — silent initial sync for a freshly created wallet.
+      navigate("/wallet", { replace: true, state: { freshImport: true } });
     } else {
       setQuizIndex(quizIndex + 1);
       setSelectedAnswer(null);

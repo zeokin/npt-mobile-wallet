@@ -20,6 +20,17 @@ export const generateLocalAddress = (pin: string | null, index: number, keyType?
     pin: pin || null, index, keyType: keyType || null, network: network || null
   });
 
+// The wallet's three main addresses (index 0 of each type). Generated once on
+// unlock/import (off the main thread) and cached in the store, so the wallet
+// shows them instantly without re-deriving on every visit.
+export interface MainAddresses {
+  generation: string;
+  ec_hybrid: string;
+  viewing_address: string;
+}
+export const generateMainAddresses = (pin: string | null, network?: string) =>
+  invoke<MainAddresses>("generate_main_addresses", { pin: pin || null, network: network || null });
+
 // UTXO scanning (uses supporter + local decryption)
 // PIN is optional — uses cached PIN from unlock if null
 export interface SyncResult {
@@ -35,13 +46,46 @@ export interface DiscoveredUtxo {
   spent_in_block: number | null;
   key_type: string;
   key_index: number;
-  utxo_hex: string;
-  sender_randomness_hex: string;
-  receiver_preimage_hex: string;
+  // Opaque to the frontend — we just pass these back to the backend if needed.
+  // The frontend should never parse these; they're typed Utxo/Digest JSON blobs.
+  utxo: unknown;
+  sender_randomness: unknown;
+  receiver_preimage: unknown;
   aocl_leaf_index: number | null;
 }
-export const syncWallet = (pin: string | null, numKeys?: number) =>
-  invoke<SyncResult>("sync_wallet", { pin: pin || null, numKeys: numKeys || null });
+// Optional per-key-type scan window. Field names match the Rust `ScanWindow`
+// struct. The UI normally omits it (one main address per type → the backend's
+// light default window suffices); kept for callers that want a custom range.
+export interface ScanWindow {
+  generation: number;
+  ec_hybrid: number;
+  viewing_address: number;
+  symmetric: number;
+}
+
+export const syncWallet = (pin: string | null, scanWindow?: ScanWindow) =>
+  invoke<SyncResult>("sync_wallet", { pin: pin || null, scanWindow: scanWindow ?? null });
+
+// Send a transaction. The backend re-scans for all unspent UTXOs and
+// selects inputs itself, so the UI doesn't need to pass UTXO indices.
+// `acceptLustrations` must be `true` on retry after the backend returned a
+// `LUSTRATION_REQUIRED:<threshold>` error.
+export const sendTransaction = (
+  pin: string,
+  recipientAddress: string,
+  amount: string,
+  fee: string,
+  acceptLustrations: boolean,
+  scanWindow?: ScanWindow,
+) =>
+  invoke<string>("send_transaction", {
+    pin,
+    recipientAddress,
+    amount,
+    fee,
+    acceptLustrations,
+    scanWindow: scanWindow ?? null,
+  });
 
 // Check if a transaction was mined (by its output addition records)
 export const checkTransactionMined = (additionRecordHexes: string[]) =>

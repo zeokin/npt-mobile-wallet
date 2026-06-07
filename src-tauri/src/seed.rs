@@ -145,7 +145,7 @@ pub fn decrypt_seed(encrypted: &[u8], pin: &str) -> Result<Vec<u8>, String> {
 }
 
 /// Check if the file uses v2 format (has our magic header).
-fn is_v2_format(data: &[u8]) -> bool {
+pub fn is_v2_format(data: &[u8]) -> bool {
     data.len() >= HEADER_LEN && &data[..4] == MAGIC
 }
 
