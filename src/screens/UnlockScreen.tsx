@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { Eye, EyeOff } from "lucide-react";
-import { unlockWallet, deleteWallet, connectNode, generateMainAddresses } from "../api/rpc";
+import { unlockWallet, deleteWallet, connectNode, generateMainAddresses, hasPendingTx } from "../api/rpc";
 import { useSettingsStore } from "../store/settings-store";
 import { useWalletStore } from "../store/wallet-store";
 import NeptuneLogo from "../components/ui/NeptuneLogo";
@@ -18,6 +18,7 @@ export default function UnlockScreen() {
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [lockoutSeconds, setLockoutSeconds] = useState(0);
   const [showSwitchConfirm, setShowSwitchConfirm] = useState(false);
+  const [showPendingWarning, setShowPendingWarning] = useState(false);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const locked = lockoutSeconds > 0;
@@ -103,6 +104,19 @@ export default function UnlockScreen() {
     }
   };
 
+  // Gate the create/import flow: block it (with a warning) while a transaction
+  // is still pending, otherwise confirm before replacing the wallet.
+  const handleSwitchRequest = async () => {
+    let pending = false;
+    try {
+      pending = await hasPendingTx();
+    } catch {
+      /* if we can't tell, fall through to the normal confirm */
+    }
+    if (pending) setShowPendingWarning(true);
+    else setShowSwitchConfirm(true);
+  };
+
   const handleSwitchWallet = async () => {
     try {
       await deleteWallet();
@@ -158,13 +172,41 @@ export default function UnlockScreen() {
         <p className="text-center text-sm text-white/70">
           Don't have an account?{" "}
           <button
-            onClick={() => setShowSwitchConfirm(true)}
+            onClick={handleSwitchRequest}
             className="font-bold text-white underline underline-offset-2"
           >
             Create/Import
           </button>
         </p>
       </div>
+
+      {/* Block create/import while a transaction is pending */}
+      {showPendingWarning && (
+        <div
+          className="fixed inset-0 z-40 bg-black/50 flex items-center justify-center px-6"
+          onClick={() => setShowPendingWarning(false)}
+        >
+          <div
+            className="w-full max-w-sm bg-white rounded-2xl p-5 space-y-3 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="text-lg font-semibold text-[var(--npt-text)] text-center">
+              Transaction pending
+            </h3>
+            <p className="text-xs text-[var(--npt-muted)] text-center leading-relaxed">
+              You have a transaction waiting to confirm. You can't create or import a
+              new wallet until it's resolved — unlock this wallet and sync to let it
+              confirm first.
+            </p>
+            <button
+              onClick={() => setShowPendingWarning(false)}
+              className="w-full py-2 rounded-full bg-[var(--npt-blue)] text-white font-semibold active:opacity-90"
+            >
+              OK
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Confirm before replacing the current wallet */}
       {showSwitchConfirm && (

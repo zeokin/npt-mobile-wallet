@@ -143,10 +143,17 @@ export default function WalletScreen() {
   }, []);
 
   const doSync = useCallback(async (showToast = true) => {
-    if (!useSettingsStore.getState().connected) return;
     setSyncing(true);
     setSyncInfo("Scanning blockchain...");
     try {
+      // The supporter connection is per-process — it does NOT survive an app
+      // restart or a wallet import — so (re)connect if this session isn't
+      // connected yet. Otherwise the backend has no RPC and sync fails with
+      // "Not connected to supporter" (which is why locking/unlocking "fixed" it).
+      if (!useSettingsStore.getState().connected) {
+        const info = await connectNode(DEFAULT_SUPPORTER);
+        setConnected(true, info.network, info.block_height);
+      }
       // Backend uses its light default window (index 0 of each type + a small
       // margin) — we only ever hand out one main address per type.
       const result = await syncWallet(null);
@@ -178,7 +185,7 @@ export default function WalletScreen() {
     } finally {
       setSyncing(false);
     }
-  }, [setBalance, setUtxos, resolvePendingTx]);
+  }, [setBalance, setUtxos, resolvePendingTx, setConnected]);
 
   useEffect(() => {
     if (!freshStart) {
