@@ -105,20 +105,30 @@ fn set_cached_pin(state: &State<'_, AppState>, new_pin: Option<String>) {
 
 /// RAII guard: sets `work_in_progress = true` on creation, clears it on drop.
 /// Guarantees the flag is cleared on every return path, including `?`-returns.
+///
+/// On drop it also resets the session activity timer, so the inactivity
+/// timeout is measured from the END of the long-running operation (e.g.
+/// multi-minute proof building) rather than its start — otherwise the screen
+/// would lock the instant the build finishes.
 struct WorkInProgressGuard<'a> {
     flag: &'a Mutex<bool>,
+    last_activity: &'a Mutex<Option<Instant>>,
 }
 
 impl<'a> WorkInProgressGuard<'a> {
-    fn new(flag: &'a Mutex<bool>) -> Self {
+    fn new(flag: &'a Mutex<bool>, last_activity: &'a Mutex<Option<Instant>>) -> Self {
         *flag.lock().unwrap() = true;
-        Self { flag }
+        Self {
+            flag,
+            last_activity,
+        }
     }
 }
 
 impl<'a> Drop for WorkInProgressGuard<'a> {
     fn drop(&mut self) {
         *self.flag.lock().unwrap() = false;
+        *self.last_activity.lock().unwrap() = Some(Instant::now());
     }
 }
 
@@ -342,6 +352,45 @@ fn generate_local_address(
     keys::derive_receiving_address(&entropy, index, kt, net)
 }
 
+/// The one main receiving address of each type (index 0), shown on the wallet.
+#[derive(Serialize)]
+struct MainAddresses {
+    generation: String,
+    ec_hybrid: String,
+    viewing_address: String,
+}
+
+/// Derive the wallet's three main addresses (generation, EC-hybrid, viewing —
+/// all at index 0) in one call. Run on the blocking pool because seed
+/// decryption (argon2) and the generation-address lattice keygen are heavy:
+/// doing them on the main thread froze the UI. Called once on unlock/import so
+/// the wallet can show addresses instantly from cache afterwards.
+#[tauri::command]
+async fn generate_main_addresses(
+    app: tauri::AppHandle,
+    pin: Option<String>,
+    network: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<MainAddresses, String> {
+    check_session(&state)?;
+    let actual_pin = pin.unwrap_or_else(|| get_cached_pin(&state).unwrap_or_default());
+    if actual_pin.is_empty() {
+        return Err("PIN required".to_string());
+    }
+    let net = network.unwrap_or_else(|| "mainnet".to_string());
+
+    tokio::task::spawn_blocking(move || -> Result<MainAddresses, String> {
+        let entropy = get_wallet_entropy(&app, &actual_pin)?;
+        Ok(MainAddresses {
+            generation: keys::derive_receiving_address(&entropy, 0, "generation", &net)?,
+            ec_hybrid: keys::derive_receiving_address(&entropy, 0, "ec_hybrid", &net)?,
+            viewing_address: keys::derive_receiving_address(&entropy, 0, "viewing_address", &net)?,
+        })
+    })
+    .await
+    .map_err(|e| format!("Address generation task failed: {e}"))?
+}
+
 /// Send NPT: build transaction locally and submit to supporter.
 /// This is the complete send pipeline:
 /// 1. Get chain tip (mutator set accumulator)
@@ -372,7 +421,7 @@ async fn send_transaction(
     // Mark this as a long-running operation so the session timer doesn't
     // expire during proof generation (which can take several minutes).
     // The guard is dropped automatically on every return path.
-    let _work_guard = WorkInProgressGuard::new(&state.work_in_progress);
+    let _work_guard = WorkInProgressGuard::new(&state.work_in_progress, &state.last_activity);
 
     // Block sending while a previous transaction is pending (prevents double-spend)
     // Check both in-memory flag and disk file (handles app restart)
@@ -1035,6 +1084,7 @@ pub fn run() {
             delete_wallet,
             // Local key derivation
             generate_local_address,
+            generate_main_addresses,
             // UTXO scanning + sending
             sync_wallet,
             send_transaction,

@@ -7,7 +7,7 @@ import {
   getBlockHeight,
   syncWallet,
   connectNode,
-  generateLocalAddress,
+  generateMainAddresses,
   hasPendingTx,
   clearPendingTx,
   checkTransactionMined,
@@ -15,7 +15,7 @@ import {
   saveOutgoingHistory,
 } from "../api/rpc";
 import { useSettingsStore } from "../store/settings-store";
-import { useWalletStore, scanWindow, type ReceiveKeyType } from "../store/wallet-store";
+import { useWalletStore, type ReceiveKeyType } from "../store/wallet-store";
 import NavBar from "../components/ui/NavBar";
 
 const DEFAULT_SUPPORTER = "https://wallet.neptunefundamentals.org";
@@ -59,7 +59,7 @@ export default function WalletScreen() {
   const freshStart = freshImport || freshUnlock;
 
   const { network, connected, setConnected } = useSettingsStore();
-  const { utxos, outgoingTxs, setBalance, setUtxos, receiveIndices } = useWalletStore();
+  const { utxos, outgoingTxs, setBalance, setUtxos, mainAddresses, setMainAddresses } = useWalletStore();
 
   // Clean up old pending transactions that have no addition records
   useEffect(() => {
@@ -70,11 +70,12 @@ export default function WalletScreen() {
   const [_syncInfo, setSyncInfo] = useState<string | null>(null);
   const [pendingBlocked, setPendingBlocked] = useState(false);
 
-  // Receive address tabs + QR modal.
+  // Receive address tabs + QR modal. Addresses come straight from the cache
+  // populated on unlock/import — no per-visit derivation (that froze the UI).
   const [addrTab, setAddrTab] = useState<ReceiveKeyType>("generation");
-  const [tabAddress, setTabAddress] = useState("");
   const [qrOpen, setQrOpen] = useState(false);
   const tabHasQr = addrTab !== "generation";
+  const tabAddress = mainAddresses[addrTab] || "";
 
   const unspentUtxos = utxos.filter((u) => !u.likely_spent);
   const confirmedBalance = unspentUtxos.reduce((sum, u) => sum + (parseFloat(u.amount) || 0), 0);
@@ -146,11 +147,9 @@ export default function WalletScreen() {
     setSyncing(true);
     setSyncInfo("Scanning blockchain...");
     try {
-      // Scan each key type's generated/discovered addresses plus a gap-limit
-      // look-ahead so funds at not-yet-generated indices are still found (e.g.
-      // after restoring this wallet from seed). Per-type windows keep it light.
-      const sw = scanWindow(useWalletStore.getState().receiveIndices);
-      const result = await syncWallet(null, sw);
+      // Backend uses its light default window (index 0 of each type + a small
+      // margin) — we only ever hand out one main address per type.
+      const result = await syncWallet(null);
 
       // Snapshot existing UTXOs BEFORE updating the store.
       // We key on aocl_leaf_index: every canonical UTXO has a unique AOCL
@@ -161,10 +160,6 @@ export default function WalletScreen() {
 
       setBalance(result.balance);
       setUtxos(result.utxos);
-      // Raise the per-type index watermark from on-chain discoveries so the
-      // next sync's gap-limit window auto-extends (heals coverage after a
-      // seed restore) and the Receive screen advances off funded addresses.
-      useWalletStore.getState().healReceiveIndicesFromUtxos(result.utxos);
       setSyncInfo(
         `Found ${result.utxo_count} UTXOs in ${result.blocks_scanned} blocks`
       );
@@ -220,13 +215,16 @@ export default function WalletScreen() {
     return () => { cancelled = true; };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Derive the receive address for the selected tab at its current index.
-  // receiveIndices heals upward after sync, so this re-derives accordingly.
+  // Safety net: addresses are normally generated on unlock/import. If the cache
+  // is empty (e.g. a transient failure there), generate them once here. This is
+  // async/off-main-thread, so it does NOT freeze the UI, and the guard means it
+  // never re-runs on a normal revisit.
   useEffect(() => {
-    generateLocalAddress(null, receiveIndices[addrTab], addrTab, network || "main")
-      .then(setTabAddress)
-      .catch(() => setTabAddress(""));
-  }, [addrTab, receiveIndices, network]);
+    if (mainAddresses.generation) return;
+    generateMainAddresses(null, network || "main")
+      .then(setMainAddresses)
+      .catch(() => { });
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!connected) return;
@@ -340,7 +338,7 @@ export default function WalletScreen() {
           <div className="flex w-full justify-center">
             <button
               onClick={() => navigate("/send")}
-              disabled={pendingBlocked}
+              disabled={pendingBlocked || syncing}
               className="flex w-1/2 items-center justify-center gap-3 bg-[var(--npt-blue)] rounded-full py-1.5 disabled:opacity-60 active:opacity-90 transition-opacity"
             >
               <div className="w-5 h-5 rounded-full border-2 border-white border-dotted flex items-center">

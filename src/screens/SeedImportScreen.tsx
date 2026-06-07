@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { ChevronLeft, Eye, EyeOff } from "lucide-react";
-import { importWallet } from "../api/rpc";
+import { importWallet, generateMainAddresses } from "../api/rpc";
 import { useWalletStore } from "../store/wallet-store";
 import NeptuneLogo from "../components/ui/NeptuneLogo";
 import NeptuneText from "../components/ui/NeptuneText";
@@ -60,6 +60,13 @@ export default function SeedImportScreen() {
     try {
       await importWallet(wordInputs.join(" "), pin);
       useWalletStore.getState().reset();
+      // Generate the three main addresses once, off the main thread, so the
+      // wallet shows them instantly. import_wallet established the session, so
+      // the PIN we just entered is valid here. Non-fatal — WalletScreen retries.
+      try {
+        const addrs = await generateMainAddresses(pin);
+        useWalletStore.getState().setMainAddresses(addrs);
+      } catch { /* WalletScreen has a fallback */ }
       toast.success("Wallet imported!");
       // Use `freshImport` instead of `freshUnlock` so the initial sync stays
       // silent — newly-discovered historical UTXOs are not "just received".

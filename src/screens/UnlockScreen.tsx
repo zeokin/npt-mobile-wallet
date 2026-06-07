@@ -2,20 +2,22 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { Eye, EyeOff } from "lucide-react";
-import { unlockWallet, deleteWallet, connectNode } from "../api/rpc";
+import { unlockWallet, deleteWallet, connectNode, generateMainAddresses } from "../api/rpc";
 import { useSettingsStore } from "../store/settings-store";
+import { useWalletStore } from "../store/wallet-store";
 import NeptuneLogo from "../components/ui/NeptuneLogo";
 
 const DEFAULT_SUPPORTER = "https://wallet.neptunefundamentals.org";
 
 export default function UnlockScreen() {
   const navigate = useNavigate();
-  const { setConnected } = useSettingsStore();
+  const { setConnected, network } = useSettingsStore();
   const [pin, setPin] = useState("");
   const [showPin, setShowPin] = useState(false);
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [lockoutSeconds, setLockoutSeconds] = useState(0);
+  const [showSwitchConfirm, setShowSwitchConfirm] = useState(false);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const locked = lockoutSeconds > 0;
@@ -61,11 +63,24 @@ export default function UnlockScreen() {
       await unlockWallet(pin);
 
       // Auto-connect to default supporter
+      let net = network;
       try {
         const info = await connectNode(DEFAULT_SUPPORTER);
         setConnected(true, info.network, info.block_height);
+        net = info.network || net;
       } catch {
         // Continue even if connection fails — user can connect manually
+      }
+
+      // Generate the three main addresses ONCE, off the main thread, before
+      // showing the wallet. WalletScreen then reads them from cache instantly
+      // (no per-visit derivation, which used to freeze the UI). Non-fatal: if it
+      // fails, WalletScreen retries.
+      try {
+        const addrs = await generateMainAddresses(null, net || "main");
+        useWalletStore.getState().setMainAddresses(addrs);
+      } catch {
+        /* WalletScreen has a fallback */
       }
 
       navigate("/wallet", { replace: true, state: { freshUnlock: true } });
@@ -143,13 +158,49 @@ export default function UnlockScreen() {
         <p className="text-center text-sm text-white/70">
           Don't have an account?{" "}
           <button
-            onClick={handleSwitchWallet}
+            onClick={() => setShowSwitchConfirm(true)}
             className="font-bold text-white underline underline-offset-2"
           >
             Create/Import
           </button>
         </p>
       </div>
+
+      {/* Confirm before replacing the current wallet */}
+      {showSwitchConfirm && (
+        <div
+          className="fixed inset-0 z-40 bg-black/50 flex items-center justify-center px-6"
+          onClick={() => setShowSwitchConfirm(false)}
+        >
+          <div
+            className="w-full max-w-sm bg-white rounded-2xl p-5 space-y-3 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="text-lg font-semibold text-[var(--npt-text)] text-center">
+              Replace this wallet?
+            </h3>
+            <p className="text-xs text-[var(--npt-muted)] text-center leading-relaxed">
+              Creating or importing a new wallet removes the current one from this
+              device. Make sure you have its 18-word seed phrase backed up — without
+              it, its funds cannot be recovered.
+            </p>
+            <div className="flex gap-2 pt-1">
+              <button
+                onClick={() => setShowSwitchConfirm(false)}
+                className="flex-1 py-2 rounded-full bg-[var(--npt-logo-bg)] text-[var(--npt-text)] font-medium active:opacity-80"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSwitchWallet}
+                className="flex-1 py-2 rounded-full bg-[var(--npt-error)] text-white font-semibold active:opacity-90"
+              >
+                Continue
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -5,7 +5,7 @@ import { ChevronLeft, ScanLine, Info, AlertCircle, Eye, EyeOff, Clock } from "lu
 import { scan, Format } from "@tauri-apps/plugin-barcode-scanner";
 import { hasPendingTx, sendTransaction } from "../api/rpc";
 import { useSettingsStore } from "../store/settings-store";
-import { useWalletStore, scanWindow } from "../store/wallet-store";
+import { useWalletStore } from "../store/wallet-store";
 
 export default function SendScreen() {
   const navigate = useNavigate();
@@ -70,7 +70,6 @@ export default function SendScreen() {
         amount,
         fee,
         acceptLustrations,
-        scanWindow(useWalletStore.getState().receiveIndices),
       );
 
       let additionRecordHexes: string[] = [];

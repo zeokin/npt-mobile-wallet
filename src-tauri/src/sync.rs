@@ -49,12 +49,14 @@ pub(crate) struct ScanWindow {
 
 impl Default for ScanWindow {
     fn default() -> Self {
-        // Generous fallback used only if the UI doesn't supply a window.
+        // Light default for the one-address-per-type model: scan index 0 of
+        // each type plus a tiny margin. Generation/EC-hybrid/viewing all use
+        // index 0; symmetric is the change key (also index 0).
         Self {
-            generation: 8,
-            ec_hybrid: 21,
-            viewing_address: 21,
-            symmetric: 1,
+            generation: 3,
+            ec_hybrid: 3,
+            viewing_address: 3,
+            symmetric: 2,
         }
     }
 }

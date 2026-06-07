@@ -20,6 +20,17 @@ export const generateLocalAddress = (pin: string | null, index: number, keyType?
     pin: pin || null, index, keyType: keyType || null, network: network || null
   });
 
+// The wallet's three main addresses (index 0 of each type). Generated once on
+// unlock/import (off the main thread) and cached in the store, so the wallet
+// shows them instantly without re-deriving on every visit.
+export interface MainAddresses {
+  generation: string;
+  ec_hybrid: string;
+  viewing_address: string;
+}
+export const generateMainAddresses = (pin: string | null, network?: string) =>
+  invoke<MainAddresses>("generate_main_addresses", { pin: pin || null, network: network || null });
+
 // UTXO scanning (uses supporter + local decryption)
 // PIN is optional — uses cached PIN from unlock if null
 export interface SyncResult {
@@ -42,8 +53,9 @@ export interface DiscoveredUtxo {
   receiver_preimage: unknown;
   aocl_leaf_index: number | null;
 }
-// Per-key-type scan window (see wallet-store `scanWindow`). Field names match
-// the Rust `ScanWindow` struct so Tauri/serde deserializes it directly.
+// Optional per-key-type scan window. Field names match the Rust `ScanWindow`
+// struct. The UI normally omits it (one main address per type → the backend's
+// light default window suffices); kept for callers that want a custom range.
 export interface ScanWindow {
   generation: number;
   ec_hybrid: number;
