@@ -1057,8 +1057,7 @@ pub fn run() {
             // not registered (the crate isn't even compiled there), so the
             // `scan` command errors and the Send screen falls back gracefully.
             #[cfg(mobile)]
-            _app.handle()
-                .plugin(tauri_plugin_barcode_scanner::init())?;
+            _app.handle().plugin(tauri_plugin_barcode_scanner::init())?;
             Ok(())
         })
         .manage(AppState {

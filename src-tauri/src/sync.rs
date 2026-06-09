@@ -177,7 +177,11 @@ pub(crate) async fn scan_for_utxos(
     let scan_plan: [(KeyType, u64, &str); 4] = [
         (KeyType::Generation, window.generation, "generation"),
         (KeyType::EcHybrid, window.ec_hybrid, "ec_hybrid"),
-        (KeyType::ViewingAddress, window.viewing_address, "viewing_address"),
+        (
+            KeyType::ViewingAddress,
+            window.viewing_address,
+            "viewing_address",
+        ),
         (KeyType::Symmetric, window.symmetric, "symmetric"),
     ];
 
