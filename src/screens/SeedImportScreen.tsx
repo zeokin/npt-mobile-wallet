@@ -2,10 +2,13 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { ChevronLeft, Eye, EyeOff } from "lucide-react";
-import { importWallet } from "../api/rpc";
+import { importWallet, generateMainAddresses, connectNode } from "../api/rpc";
 import { useWalletStore } from "../store/wallet-store";
+import { useSettingsStore } from "../store/settings-store";
 import NeptuneLogo from "../components/ui/NeptuneLogo";
 import NeptuneText from "../components/ui/NeptuneText";
+
+const DEFAULT_SUPPORTER = "https://wallet.neptunefundamentals.org";
 
 function getPasswordStrength(pw: string): { label: string; color: string; width: string } {
   if (pw.length === 0) return { label: "", color: "", width: "0%" };
@@ -60,6 +63,24 @@ export default function SeedImportScreen() {
     try {
       await importWallet(wordInputs.join(" "), pin);
       useWalletStore.getState().reset();
+
+      // Connect to the supporter now — exactly like the unlock flow. The RPC
+      // connection is per-process, so without connecting here the freshly
+      // imported wallet has no connection and its automatic first sync fails.
+      let net: string | undefined;
+      try {
+        const info = await connectNode(DEFAULT_SUPPORTER);
+        useSettingsStore.getState().setConnected(true, info.network, info.block_height);
+        net = info.network;
+      } catch { /* WalletScreen will retry the connect on sync */ }
+
+      // Generate the three main addresses once, off the main thread, so the
+      // wallet shows them instantly. import_wallet established the session, so
+      // the PIN we just entered is valid here. Non-fatal — WalletScreen retries.
+      try {
+        const addrs = await generateMainAddresses(pin, net);
+        useWalletStore.getState().setMainAddresses(addrs);
+      } catch { /* WalletScreen has a fallback */ }
       toast.success("Wallet imported!");
       // Use `freshImport` instead of `freshUnlock` so the initial sync stays
       // silent — newly-discovered historical UTXOs are not "just received".

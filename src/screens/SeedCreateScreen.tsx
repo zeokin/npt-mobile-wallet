@@ -57,7 +57,13 @@ export default function SeedCreateScreen() {
     const correct = words[correctIdx];
     const others = pickRandom(words.length, 3, correctIdx).map((i) => words[i]);
     const options = [correct, ...others];
-    return options.sort(() => correct.charCodeAt(0) + others.length - 150);
+    // Fisher–Yates shuffle so the correct answer lands in a random slot. (The
+    // old `sort` used a constant comparator, which always pushed it to D.)
+    for (let i = options.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [options[i], options[j]] = [options[j], options[i]];
+    }
+    return options;
   }, [words, quizPositions, quizIndex]);
 
   const strength = getPasswordStrength(pin);
@@ -297,7 +303,7 @@ export default function SeedCreateScreen() {
             <div className="grid grid-cols-1 gap-2">
               {quizOptions.map((option, i) => {
                 let style = "border-[var(--npt-border)] bg-white";
-                if (showResult && option === correctWord) {
+                if (showResult && isCorrect && option === correctWord) {
                   style = "border-[var(--npt-success)] bg-green-50";
                 } else if (showResult && selectedAnswer === option && !isCorrect) {
                   style = "border-[var(--npt-error)] bg-red-50";

@@ -28,6 +28,17 @@ export const useSettingsStore = create<SettingsState>()(
       reset: () =>
         set({ connected: false, network: null, blockHeight: 0 }),
     }),
-    { name: "npt-settings" }
+    {
+      name: "npt-settings",
+      // Persist only real settings. `connected`/`network`/`blockHeight` describe
+      // the live supporter RPC connection, which is per-process and is gone
+      // after an app restart or a wallet import — persisting them leaves a stale
+      // `connected: true` that makes the wallet skip connecting and then fail to
+      // sync. Reset them to defaults on each launch.
+      partialize: (state) => ({
+        nodeUrl: state.nodeUrl,
+        authToken: state.authToken,
+      }),
+    }
   )
 );

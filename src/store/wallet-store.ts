@@ -1,20 +1,32 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import type { DiscoveredUtxo } from "../api/rpc";
+import type { DiscoveredUtxo, MainAddresses } from "../api/rpc";
 import { saveOutgoingHistory, loadOutgoingHistory } from "../api/rpc";
+
+/// Receive address types shown on the wallet — one main address each (index 0).
+export type ReceiveKeyType = "generation" | "ec_hybrid" | "viewing_address";
+
+const EMPTY_MAIN_ADDRESSES: MainAddresses = {
+  generation: "",
+  ec_hybrid: "",
+  viewing_address: "",
+};
 
 interface WalletState {
   balance: string;
   utxos: DiscoveredUtxo[];
   outgoingTxs: OutgoingTx[];
-  myAddress: string;
+  /// The three main addresses, generated once on unlock/import and cached here
+  /// so the wallet shows them instantly (no per-visit derivation, which froze
+  /// the UI). Persisted so they survive navigation/restart.
+  mainAddresses: MainAddresses;
   loading: boolean;
   error: string | null;
   lastSyncHeight: number;
   setBalance: (balance: string) => void;
   setUtxos: (utxos: DiscoveredUtxo[]) => void;
   addOutgoingTx: (tx: OutgoingTx) => void;
-  setMyAddress: (address: string) => void;
+  setMainAddresses: (addrs: MainAddresses) => void;
   setLoading: (loading: boolean) => void;
   setError: (error: string | null) => void;
   setLastSyncHeight: (height: number) => void;
@@ -39,13 +51,13 @@ export const useWalletStore = create<WalletState>()(
       balance: "0",
       utxos: [],
       outgoingTxs: [],
-      myAddress: "",
+      mainAddresses: { ...EMPTY_MAIN_ADDRESSES },
       loading: false,
       error: null,
       lastSyncHeight: 0,
       setBalance: (balance) => set({ balance }),
       setUtxos: (utxos) => set({ utxos }),
-      setMyAddress: (address) => set({ myAddress: address }),
+      setMainAddresses: (addrs) => set({ mainAddresses: addrs }),
       addOutgoingTx: (tx) =>
         set((state) => {
           const updated = [tx, ...state.outgoingTxs];
@@ -71,13 +83,13 @@ export const useWalletStore = create<WalletState>()(
             (tx) => tx.addition_record_hexes?.length > 0 || tx.status === "confirmed"
           ),
         })),
-      reset: () =>{
+      reset: () => {
         saveOutgoingHistory(JSON.stringify([])).catch(() => {});
         set({
           balance: "0",
           utxos: [],
           outgoingTxs: [],
-          myAddress: "",
+          mainAddresses: { ...EMPTY_MAIN_ADDRESSES },
           loading: false,
           error: null,
           lastSyncHeight: 0,

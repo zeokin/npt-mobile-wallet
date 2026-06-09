@@ -1,7 +1,8 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
-import { ChevronLeft, Send, Info, AlertCircle, Eye, EyeOff, Clock } from "lucide-react";
+import { ChevronLeft, ScanLine, Info, AlertCircle, Eye, EyeOff, Clock } from "lucide-react";
+import { scan, Format } from "@tauri-apps/plugin-barcode-scanner";
 import { hasPendingTx, sendTransaction } from "../api/rpc";
 import { useSettingsStore } from "../store/settings-store";
 import { useWalletStore } from "../store/wallet-store";
@@ -122,6 +123,22 @@ export default function SendScreen() {
     await submitSend(true);
   };
 
+  // Scan a recipient QR code (native camera, mobile only) and fill the address
+  // input. QR payloads are `NPT:<ADDRESS>` (uppercased); we strip the scheme
+  // and lowercase back to the bech32m address the backend expects.
+  const handleScan = async () => {
+    try {
+      const res = await scan({ windowed: false, formats: [Format.QRCode] });
+      const content = (res?.content ?? "").trim().replace(/^npt:/i, "");
+      if (content) {
+        setAddress(content.toLowerCase());
+        toast.success("Address scanned");
+      }
+    } catch {
+      toast.error("QR scanning is only available on mobile");
+    }
+  };
+
   return (
     <div className="relative flex flex-col h-full bg-[var(--npt-logo-bg)] safe-top safe-bottom">
       {/* Header */}
@@ -138,9 +155,13 @@ export default function SendScreen() {
       <div className="h-15/16 relative">
         {/* Send icon */}
         <div className="absolute left-1/2 -translate-x-1/2 -translate-y-1/2 flex justify-center py-2">
-          <div className="w-12 h-12 rounded-full border-2 border-white border-dotted bg-[var(--npt-blue)] flex items-center justify-center">
-            <Send size={20} className="text-white rotate-45" />
-          </div>
+          <button
+            onClick={handleScan}
+            className="w-12 h-12 rounded-full border-2 border-white border-dotted bg-[var(--npt-blue)] flex items-center justify-center active:opacity-90"
+            aria-label="Scan recipient QR code"
+          >
+            <ScanLine size={20} className="text-white" />
+          </button>
         </div>
 
         <div className="h-full bg-white shadow-2xl shadow-black px-4 pt-8 pb-4 flex flex-col rounded-t-3xl">
