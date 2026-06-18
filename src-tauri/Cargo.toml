@@ -1,6 +1,6 @@
 [package]
 name = "npt-mobile-wallet"
-version = "0.2.0"
+version = "0.2.1"
 description = "Neptune Cash Wallet"
 authors = ["you"]
 edition = "2021"
@@ -31,11 +31,13 @@ rayon = "1"
 # Neptune-core types for local key derivation and transaction building.
 # This is the critical dependency — gives us SecretKeyMaterial, WalletEntropy,
 # GenerationSpendingKey, ReceivingAddress, etc.
-# Neptune-core v0.11.0 — adds the viewing-address and elliptic-curve-hybrid
-# (EC-hybrid) address formats used for QR receive, and deprecates symmetric
-# addresses. (v0.10.0 added lustration support: hardfork-beta at block 38,000,
-# and verify-lustration-before-accept in supporter's submit_transaction.)
-neptune-cash = "0.11.0"
+# Neptune-core v0.12.0 — hardfork-gamma (consensus); tasm-lib/triton-vm
+# 3.0.0 -> 7.0.0; "Use entire payload when generating encryption seed and
+# nonce" (EC-hybrid/viewing). Every public API this wallet touches is
+# byte-identical to 0.11.0, so this is a pure dependency bump.
+# (v0.11.0 added the viewing-address and EC-hybrid address formats used for QR
+# receive; v0.10.0 added lustration support: hardfork-beta at block 38,000.)
+neptune-cash = "0.12.0"
 
 # Seed management
 bip39 = "2.1"

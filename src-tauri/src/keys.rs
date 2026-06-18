@@ -68,23 +68,16 @@ pub(crate) fn key_type_from_str(key_type: &str) -> Result<KeyType, String> {
 
 /// Derive the [`SpendingKey`] at `index` for a [`KeyType`].
 ///
-/// Dispatches to the correct per-type derivation for every key type
-/// (generation, symmetric, EC-hybrid, viewing) and wraps it in the
-/// `SpendingKey` enum via its `From` impls.
+/// neptune-cash 0.12 moved `nth_spending_key` from `WalletState` to
+/// `WalletEntropy` and made it public, so this delegates to the canonical
+/// per-`KeyType` dispatch instead of hand-rolling it (matching the desktop
+/// wallet's 0.12 adaptation). The `Result` wrapper is kept for the callers.
 pub(crate) fn nth_spending_key(
     entropy: &WalletEntropy,
     key_type: KeyType,
     index: u64,
 ) -> Result<SpendingKey, String> {
-    let sk: SpendingKey = match key_type {
-        KeyType::Generation => entropy.nth_generation_spending_key(index).into(),
-        KeyType::Symmetric => entropy.nth_symmetric_key(index).into(),
-        KeyType::EcHybrid => entropy.nth_ec_hybrid_key(index).into(),
-        KeyType::ViewingAddress => entropy.nth_viewing_address_key(index).into(),
-        // KeyType is #[non_exhaustive]; guard against future variants.
-        other => return Err(format!("Unsupported key type: {other:?}")),
-    };
-    Ok(sk)
+    Ok(entropy.nth_spending_key(key_type, index))
 }
 
 /// Derive the [`SpendingKey`] at `index` for the given key-type string.
