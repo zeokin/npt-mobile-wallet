@@ -1,6 +1,6 @@
 //! JSON-RPC transport for neptune-core supporter nodes.
 //!
-//! We implement neptune-cash's [`Transport`] trait. Because neptune-cash
+//! We implement neptune-rpc-api's [`Transport`] trait. Because neptune-rpc-api
 //! provides a blanket `impl<T: Transport> RpcApi for T`, implementing
 //! `Transport` gives us every typed RPC method (`tip`, `height`, `network`,
 //! `get_blocks`, `was_mined`, `restore_membership_proof`,
@@ -11,17 +11,20 @@
 //! Equivalent to the official `neptune-rpc-client` crate, but built on
 //! reqwest with `rustls-tls` so we don't pull OpenSSL into Android builds.
 
-use async_trait::async_trait;
-use neptune_cash::application::json_rpc::core::api::client::transport::Transport;
-use neptune_cash::application::json_rpc::core::api::rpc::RpcApi;
-use neptune_cash::application::json_rpc::core::model::json::{
-    JsonError, JsonRequest, JsonResponse, JsonResult,
-};
-use reqwest::Client;
-use serde_json::Value;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::AtomicU64;
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::Duration;
+
+use async_trait::async_trait;
+use neptune_rpc_api::api::client::transport::Transport;
+use neptune_rpc_api::api::rpc::RpcApi;
+use neptune_rpc_api::model::json::JsonError;
+use neptune_rpc_api::model::json::JsonRequest;
+use neptune_rpc_api::model::json::JsonResponse;
+use neptune_rpc_api::model::json::JsonResult;
+use reqwest::Client;
+use serde_json::Value;
 
 #[derive(Clone)]
 pub(crate) struct RpcClient {

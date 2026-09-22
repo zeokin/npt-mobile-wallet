@@ -15,20 +15,27 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
 
-use neptune_cash::api::export::Digest;
-use neptune_cash::api::export::KeyType;
-use neptune_cash::api::export::Timestamp;
-use neptune_cash::api::export::Utxo;
-use neptune_cash::application::config::network::Network;
-use neptune_cash::application::json_rpc::core::api::rpc::RpcApi;
-use neptune_cash::prelude::triton_vm::prelude::BFieldElement;
-use neptune_cash::protocol::consensus::block::block_height::BlockHeight;
-use neptune_cash::protocol::consensus::block::block_selector::BlockSelector;
-use neptune_cash::protocol::consensus::block::Block;
-use neptune_cash::state::wallet::address::announcement_flag::AnnouncementFlag;
-use neptune_cash::state::wallet::address::ReceivingAddress;
-use neptune_cash::state::wallet::address::SpendingKey;
-use neptune_cash::state::wallet::wallet_entropy::WalletEntropy;
+use neptune_consensus::block::block_kernel::BlockKernel;
+use neptune_consensus::block::Block;
+use neptune_consensus::transaction::utxo::Utxo;
+use neptune_mutator_set::commit;
+use neptune_mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
+use neptune_primitives::announcement_flag::AnnouncementFlag;
+use neptune_primitives::block_height::BlockHeight;
+use neptune_primitives::block_selector::BlockSelector;
+use neptune_primitives::network::Network;
+use neptune_primitives::tasm_lib::prelude::Digest;
+use neptune_primitives::tasm_lib::prelude::Tip5;
+use neptune_primitives::timestamp::Timestamp;
+use neptune_primitives::triton_vm::prelude::BFieldElement;
+use neptune_primitives::twenty_first::util_types::mmr::mmr_trait::Mmr;
+use neptune_rpc_api::api::rpc::RpcApi;
+use neptune_rpc_api::api::rpc::RpcError;
+use neptune_rpc_api::model::json::JsonError;
+use neptune_wallet::address::KeyType;
+use neptune_wallet::address::ReceivingAddress;
+use neptune_wallet::address::SpendingKey;
+use neptune_wallet::wallet_entropy::WalletEntropy;
 use rayon::prelude::*;
 use serde::Deserialize;
 use serde::Serialize;
@@ -229,15 +236,13 @@ pub(crate) async fn scan_for_utxos(
     let block_heights_resp =
         rpc.block_heights_by_flags(flags.clone())
             .await
-            .map_err(|e| {
-                match e {
-            neptune_cash::application::json_rpc::core::api::rpc::RpcError::Server(
-                neptune_cash::application::json_rpc::core::model::json::JsonError::MethodNotFound,
-            ) => "Supporter does not have UTXO index enabled. \
+            .map_err(|e| match e {
+                RpcError::Server(JsonError::MethodNotFound) => {
+                    "Supporter does not have UTXO index enabled. \
                   Ask the node operator to run with --utxo-index flag."
-                .to_string(),
-            other => format!("block_heights_by_flags: {}", other),
-        }
+                        .to_string()
+                }
+                other => format!("block_heights_by_flags: {}", other),
             })?;
     let block_heights: Vec<u64> = block_heights_resp
         .block_heights
@@ -396,10 +401,6 @@ pub(crate) async fn scan_for_utxos(
 
     // Step 5: Fetch wallet blocks (cached + parallel)
     // Collect all unique block heights we need
-    use neptune_cash::prelude::triton_vm::prelude::Digest;
-    use neptune_cash::prelude::twenty_first::util_types::mmr::mmr_trait::Mmr;
-    use neptune_cash::protocol::consensus::block::block_kernel::BlockKernel;
-    use neptune_cash::util_types::mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
 
     let mut needed_heights: HashSet<u64> = HashSet::new();
     for utxo in &discovered {
@@ -438,8 +439,6 @@ pub(crate) async fn scan_for_utxos(
     }
     // Insert genesis block locally if needed (supporter may not serve block 0 via RPC)
     if needed_heights.contains(&0) && !block_cache.contains_key(&0) {
-        use neptune_cash::application::config::network::Network;
-        use neptune_cash::protocol::consensus::block::Block;
         let genesis = Block::genesis(Network::Main);
         let genesis_hash = genesis.hash();
         let genesis_kernel: BlockKernel = genesis.kernel.clone();
@@ -491,12 +490,11 @@ pub(crate) async fn scan_for_utxos(
             Err(_) => continue,
         };
 
-        let item = neptune_cash::prelude::triton_vm::prelude::Tip5::hash(&utxo_data.utxo);
+        let item = Tip5::hash(&utxo_data.utxo);
         let receiver_preimage = utxo_data.receiver_preimage;
         let receiver_digest = receiver_preimage.hash();
         let sender_randomness = utxo_data.sender_randomness;
-        let commitment =
-            neptune_cash::util_types::mutator_set::commit(item, sender_randomness, receiver_digest);
+        let commitment = commit(item, sender_randomness, receiver_digest);
 
         // Find our UTXO's position in the block's additions
         for (i, addition) in all_additions.iter().enumerate() {
@@ -652,7 +650,7 @@ fn parse_announcement_message(val: &serde_json::Value) -> Option<Vec<BFieldEleme
 }
 
 /// Format UTXO native currency amount for display.
-fn format_utxo_amount(utxo: &neptune_cash::protocol::consensus::transaction::utxo::Utxo) -> String {
+fn format_utxo_amount(utxo: &Utxo) -> String {
     let amount = utxo.get_native_currency_amount();
     format!("{}", amount)
 }
@@ -660,7 +658,7 @@ fn format_utxo_amount(utxo: &neptune_cash::protocol::consensus::transaction::utx
 #[cfg(test)]
 mod tests {
     use itertools::Itertools;
-    use neptune_cash::api::export::NativeCurrencyAmount;
+    use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
 
     use super::*;
     use crate::keys::wallet_entropy_from_phrase;
