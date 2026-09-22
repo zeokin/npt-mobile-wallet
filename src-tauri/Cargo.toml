@@ -105,3 +105,7 @@ incremental = false
 debug-assertions = false
 overflow-checks = false
 
+[features]
+# Prove a real send, verify it under hardfork delta rules locally, and stop
+# before broadcasting. For testing before block 55,000 only.
+delta-dry-run = []

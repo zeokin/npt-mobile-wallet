@@ -789,6 +789,29 @@ async fn send_transaction(
     *state.last_activity.lock().unwrap() = Some(Instant::now());
     debug_log!("[SEND] Transaction built!");
 
+    // Pre-fork test hook: check the proof the way a node will after hardfork
+    // delta, then stop instead of broadcasting. The gamma check is a negative
+    // control and must fail, proving the delta result is not vacuous.
+    #[cfg(feature = "delta-dry-run")]
+    {
+        use neptune_consensus::consensus_rule_set::ConsensusRuleSet;
+        use neptune_primitives::mast_hash::MastHash;
+        let txk_mast_hash = tx.kernel.mast_hash();
+        let under_delta = tx
+            .proof
+            .verify(txk_mast_hash, network, ConsensusRuleSet::HardforkDelta)
+            .await;
+        let under_gamma = tx
+            .proof
+            .verify(txk_mast_hash, network, ConsensusRuleSet::HardforkGamma)
+            .await;
+        let verdict = format!(
+            "DRY RUN, not broadcast: valid under delta = {under_delta}, valid under gamma = {under_gamma} (expected true, false)"
+        );
+        debug_log!("[SEND] {}", verdict);
+        return Err(verdict);
+    }
+
     // Step 11: Submit transaction
     debug_log!("[SEND] Step 11: Submitting transaction...");
     let rpc_tx: neptune_rpc_api::model::wallet::transaction::RpcTransaction = tx
