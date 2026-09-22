@@ -41,10 +41,7 @@ use tasm_lib::triton_vm::prelude::Program;
 use tasm_lib::triton_vm::proof::Claim;
 
 /// Maximum log2 padded height for proof generation.
-/// Must complete within ~9 minutes (before next block invalidates proofs).
-/// Testing results: 2^23 takes ~3 min on desktop.
-/// 2^24 would take ~6-8 min. 2^25 would risk exceeding block time.
-const MAX_LOG2_PADDED_HEIGHT: u8 = 24;
+const MAX_LOG2_PADDED_HEIGHT: u8 = 17;
 
 /// Number of blocks before a consensus hardfork during which sending is
 /// refused. A transaction built under the old rules would be rejected once the
