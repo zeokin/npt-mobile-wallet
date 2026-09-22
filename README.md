@@ -20,7 +20,6 @@ All private keys are derived and stored locally on the device. Transactions are 
   - `src/rpc.rs` — JSON-RPC client for supporter node
   - `src/transaction.rs` — STARK proof generation for sends
   - `gen/android/` — generated Android project (gradle, manifest, Kotlin shims)
-- `leveldb-sys/`, `systemstat-stub/` — stubs so `neptune-cash` compiles on mobile
 
 ## Run in development mode on a Debian/Ubuntu system
 
@@ -113,7 +112,8 @@ $ANDROID_HOME/build-tools/36.0.0/apksigner sign \
 
 ## Supporter node
 
-The wallet needs a neptune-core node with the following RPC namespaces enabled:
+The wallet needs a neptune-core node, v0.17.1 or later (hardfork delta), with the
+following RPC namespaces enabled:
 `node`, `chain`, `wallet`, `archival`, `utxoindex`. The `personal` namespace is
 **not** required and the wallet never calls it — it is privacy-violating and
 would require `--unsafe-rpc` on the node, which is never acceptable for a

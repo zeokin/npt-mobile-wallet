@@ -1,6 +1,6 @@
 //! JSON-RPC transport for neptune-core supporter nodes.
 //!
-//! We implement neptune-cash's [`Transport`] trait. Because neptune-cash
+//! We implement neptune-rpc-api's [`Transport`] trait. Because neptune-rpc-api
 //! provides a blanket `impl<T: Transport> RpcApi for T`, implementing
 //! `Transport` gives us every typed RPC method (`tip`, `height`, `network`,
 //! `get_blocks`, `was_mined`, `restore_membership_proof`,

@@ -68,10 +68,10 @@ pub(crate) fn key_type_from_str(key_type: &str) -> Result<KeyType, String> {
 
 /// Derive the [`SpendingKey`] at `index` for a [`KeyType`].
 ///
-/// neptune-cash 0.12 moved `nth_spending_key` from `WalletState` to
-/// `WalletEntropy` and made it public, so this delegates to the canonical
-/// per-`KeyType` dispatch instead of hand-rolling it (matching the desktop
-/// wallet's 0.12 adaptation). The `Result` wrapper is kept for the callers.
+/// `WalletEntropy::nth_spending_key` is public (since neptune-cash 0.12), so
+/// this delegates to the canonical per-`KeyType` dispatch instead of
+/// hand-rolling it, as the desktop wallet does. The `Result` wrapper is kept
+/// for the callers.
 pub(crate) fn nth_spending_key(
     entropy: &WalletEntropy,
     key_type: KeyType,

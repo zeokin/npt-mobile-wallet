@@ -18,7 +18,7 @@ jobs:
     name: Build + lint (Android)
     runs-on: ubuntu-latest
     timeout-minutes: 45
-    # neptune-cash has very deep macro expansions (the RpcApi blanket impl)
+    # neptune-rpc-api has very deep macro expansions (the RpcApi blanket impl)
     # that exceed rustc's default thread stack on GitHub runners. Bump it.
     env:
       RUST_MIN_STACK: 16777216

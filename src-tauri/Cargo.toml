@@ -28,15 +28,15 @@ async-trait = "0.1"
 # parallel. Declaring it directly so the scan can call into rayon.
 rayon = "1"
 
-# Neptune-core types for local key derivation and transaction building.
-# This is the critical dependency — gives us SecretKeyMaterial, WalletEntropy,
-# GenerationSpendingKey, ReceivingAddress, etc.
-# Neptune-core v0.12.0 — hardfork-gamma (consensus); tasm-lib/triton-vm
-# 3.0.0 -> 7.0.0; "Use entire payload when generating encryption seed and
-# nonce" (EC-hybrid/viewing). Every public API this wallet touches is
-# byte-identical to 0.11.0, so this is a pure dependency bump.
-# (v0.11.0 added the viewing-address and EC-hybrid address formats used for QR
-# receive; v0.10.0 added lustration support: hardfork-beta at block 38,000.)
+# Neptune-core types for local key derivation, sync and transaction building.
+# neptune-core 0.14 split the monolithic neptune-cash crate into these
+# library crates; depending on them directly keeps the node itself (libp2p,
+# LevelDB, ...) out of the mobile build.
+# v0.17.1: hardfork delta (main net block 55,000) proves with triton-vm 8,
+# claim version 8. The re-exported triton_vm stamps that version, so proofs
+# built by this version are rejected before block 55,000.
+# (v0.12.0 was hardfork gamma, triton-vm 7; v0.11.0 added the viewing-address
+# and EC-hybrid address formats; v0.10.0 added lustration, hardfork beta.)
 neptune-consensus = "0.17.1"
 neptune-primitives = "0.17.1"
 neptune-mutator-set = "0.17.1"
@@ -58,12 +58,6 @@ bincode = "1"
 # simply not registered there, and the UI falls back gracefully.
 [target.'cfg(any(target_os = "android", target_os = "ios"))'.dependencies]
 tauri-plugin-barcode-scanner = "2"
-
-# Override leveldb-sys with a stub — we don't use LevelDB in the mobile wallet,
-# but neptune-cash pulls it in transitively. The stub avoids CMake cross-compile issues.
-[patch.crates-io]
-leveldb-sys = { path = "../leveldb-sys" }
-systemstat = { path = "../systemstat-stub" }
 
 # triton-vm's build script (build.rs) does heavy recursive codegen
 # (Constraints::all → degree lowering → syn/prettyplease over huge expression
