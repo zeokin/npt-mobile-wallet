@@ -12,11 +12,9 @@
 //! reqwest with `rustls-tls` so we don't pull OpenSSL into Android builds.
 
 use async_trait::async_trait;
-use neptune_cash::application::json_rpc::core::api::client::transport::Transport;
-use neptune_cash::application::json_rpc::core::api::rpc::RpcApi;
-use neptune_cash::application::json_rpc::core::model::json::{
-    JsonError, JsonRequest, JsonResponse, JsonResult,
-};
+use neptune_rpc_api::api::client::transport::Transport;
+use neptune_rpc_api::api::rpc::RpcApi;
+use neptune_rpc_api::model::json::{JsonError, JsonRequest, JsonResponse, JsonResult};
 use reqwest::Client;
 use serde_json::Value;
 use std::sync::atomic::{AtomicU64, Ordering};

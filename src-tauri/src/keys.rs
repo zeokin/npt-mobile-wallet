@@ -15,11 +15,11 @@
 //! All address derivation goes through `WalletEntropy::nth_receiving_address`,
 //! which dispatches to the per-type derivation internally.
 
-use neptune_cash::api::export::KeyType;
-use neptune_cash::application::config::network::Network;
-use neptune_cash::state::wallet::address::ReceivingAddress;
-use neptune_cash::state::wallet::address::SpendingKey;
-use neptune_cash::state::wallet::wallet_entropy::WalletEntropy;
+use neptune_primitives::network::Network;
+use neptune_wallet::address::KeyType;
+use neptune_wallet::address::ReceivingAddress;
+use neptune_wallet::address::SpendingKey;
+use neptune_wallet::wallet_entropy::WalletEntropy;
 
 /// Derive a WalletEntropy from a BIP39 seed phrase (18 words).
 ///
@@ -156,9 +156,9 @@ mod tests {
 
     #[test]
     fn test_announcement_flag_serialization() {
-        use neptune_cash::api::export::KeyType;
-        use neptune_cash::state::wallet::address::announcement_flag::AnnouncementFlag;
-        use neptune_cash::state::wallet::address::ReceivingAddress;
+        use neptune_primitives::announcement_flag::AnnouncementFlag;
+        use neptune_wallet::address::KeyType;
+        use neptune_wallet::address::ReceivingAddress;
 
         let words = test_phrase();
         let entropy = wallet_entropy_from_phrase(&words).unwrap();
@@ -217,8 +217,8 @@ mod tests {
 
     #[test]
     fn test_new_address_types_roundtrip_via_from_bech32m() {
-        use neptune_cash::application::config::network::Network;
-        use neptune_cash::state::wallet::address::ReceivingAddress;
+        use neptune_primitives::network::Network;
+        use neptune_wallet::address::ReceivingAddress;
 
         let words = test_phrase();
         let entropy = wallet_entropy_from_phrase(&words).unwrap();

@@ -12,25 +12,25 @@
 use anyhow::anyhow;
 use anyhow::Result;
 use itertools::Itertools;
-use neptune_cash::api::export::Tip5;
-use neptune_cash::api::export::TransactionDetails;
-use neptune_cash::api::export::TransactionProof;
-use neptune_cash::prelude::tasm_lib;
-use neptune_cash::prelude::triton_vm::proof::Proof;
-use neptune_cash::prelude::triton_vm::stark::Stark;
-use neptune_cash::prelude::triton_vm::vm::NonDeterminism;
-use neptune_cash::prelude::triton_vm::vm::PublicInput;
-use neptune_cash::prelude::triton_vm::vm::VM;
-use neptune_cash::protocol::consensus::transaction::primitive_witness::PrimitiveWitness;
-use neptune_cash::protocol::consensus::transaction::transaction_kernel::TransactionKernelField;
-use neptune_cash::protocol::consensus::transaction::validity::collect_lock_scripts::CollectLockScriptsWitness;
-use neptune_cash::protocol::consensus::transaction::validity::collect_type_scripts::CollectTypeScriptsWitness;
-use neptune_cash::protocol::consensus::transaction::validity::kernel_to_outputs::KernelToOutputsWitness;
-use neptune_cash::protocol::consensus::transaction::validity::proof_collection::ProofCollection;
-use neptune_cash::protocol::consensus::transaction::validity::removal_records_integrity::RemovalRecordsIntegrityWitness;
-use neptune_cash::protocol::consensus::transaction::Transaction;
-use neptune_cash::protocol::proof_abstractions::mast_hash::MastHash;
-use neptune_cash::protocol::proof_abstractions::SecretWitness;
+use neptune_consensus::proof_abstractions::SecretWitness;
+use neptune_consensus::transaction::primitive_witness::PrimitiveWitness;
+use neptune_consensus::transaction::transaction_kernel::TransactionKernelField;
+use neptune_consensus::transaction::validity::collect_lock_scripts::CollectLockScriptsWitness;
+use neptune_consensus::transaction::validity::collect_type_scripts::CollectTypeScriptsWitness;
+use neptune_consensus::transaction::validity::kernel_to_outputs::KernelToOutputsWitness;
+use neptune_consensus::transaction::validity::proof_collection::ProofCollection;
+use neptune_consensus::transaction::validity::removal_records_integrity::RemovalRecordsIntegrityWitness;
+use neptune_consensus::transaction::Transaction;
+use neptune_consensus::transaction::TransactionProof;
+use neptune_primitives::mast_hash::MastHash;
+use neptune_wallet::tasm_lib;
+use neptune_wallet::tasm_lib::prelude::Tip5;
+use neptune_wallet::transaction_details::TransactionDetails;
+use neptune_wallet::triton_vm::proof::Proof;
+use neptune_wallet::triton_vm::stark::Stark;
+use neptune_wallet::triton_vm::vm::NonDeterminism;
+use neptune_wallet::triton_vm::vm::PublicInput;
+use neptune_wallet::triton_vm::vm::VM;
 use tasm_lib::triton_vm::prelude::Program;
 use tasm_lib::triton_vm::proof::Claim;
 
@@ -47,7 +47,7 @@ const MAX_LOG2_PADDED_HEIGHT: u8 = 24;
 pub(crate) async fn build_transaction(
     transaction_details: &TransactionDetails,
 ) -> Result<Transaction> {
-    let primitive_witness = PrimitiveWitness::from_transaction_details(transaction_details);
+    let primitive_witness = transaction_details.primitive_witness();
     let kernel = primitive_witness.kernel.clone();
 
     let proof = tokio::task::spawn_blocking(move || {
