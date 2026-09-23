@@ -20,7 +20,6 @@ All private keys are derived and stored locally on the device. Transactions are 
   - `src/rpc.rs` — JSON-RPC client for supporter node
   - `src/transaction.rs` — STARK proof generation for sends
   - `gen/android/` — generated Android project (gradle, manifest, Kotlin shims)
-- `leveldb-sys/`, `systemstat-stub/` — stubs so `neptune-cash` compiles on mobile
 
 ## Run in development mode on a Debian/Ubuntu system
 

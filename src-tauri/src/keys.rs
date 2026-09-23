@@ -6,20 +6,20 @@
 //! Flow: seed phrase (18 words) → SecretKeyMaterial → WalletEntropy
 //!       → GenerationSpendingKey(index) → ReceivingAddress
 //!
-//! Supported key types (neptune-core v0.11.0):
+//! Supported key types:
 //!   - "generation"      : quantum-secure, reusable, but very long (no QR).
 //!   - "ec_hybrid"       : elliptic-curve hybrid, short → QR-friendly.
 //!   - "viewing_address" : symmetric viewing address, short → QR-friendly.
-//!   - "symmetric"       : deprecated in v0.11.0; kept for back-compat only.
+//!   - "symmetric"       : deprecated upstream; kept for back-compat only.
 //!
 //! All address derivation goes through `WalletEntropy::nth_receiving_address`,
 //! which dispatches to the per-type derivation internally.
 
-use neptune_cash::api::export::KeyType;
-use neptune_cash::application::config::network::Network;
-use neptune_cash::state::wallet::address::ReceivingAddress;
-use neptune_cash::state::wallet::address::SpendingKey;
-use neptune_cash::state::wallet::wallet_entropy::WalletEntropy;
+use neptune_primitives::network::Network;
+use neptune_wallet::address::KeyType;
+use neptune_wallet::address::ReceivingAddress;
+use neptune_wallet::address::SpendingKey;
+use neptune_wallet::wallet_entropy::WalletEntropy;
 
 /// Derive a WalletEntropy from a BIP39 seed phrase (18 words).
 ///
@@ -67,11 +67,6 @@ pub(crate) fn key_type_from_str(key_type: &str) -> Result<KeyType, String> {
 }
 
 /// Derive the [`SpendingKey`] at `index` for a [`KeyType`].
-///
-/// neptune-cash 0.12 moved `nth_spending_key` from `WalletState` to
-/// `WalletEntropy` and made it public, so this delegates to the canonical
-/// per-`KeyType` dispatch instead of hand-rolling it (matching the desktop
-/// wallet's 0.12 adaptation). The `Result` wrapper is kept for the callers.
 pub(crate) fn nth_spending_key(
     entropy: &WalletEntropy,
     key_type: KeyType,
@@ -103,6 +98,8 @@ fn parse_network(s: &str) -> Result<Network, String> {
 
 #[cfg(test)]
 mod tests {
+    use neptune_primitives::announcement_flag::AnnouncementFlag;
+
     use super::*;
 
     fn test_phrase() -> Vec<String> {
@@ -156,10 +153,6 @@ mod tests {
 
     #[test]
     fn test_announcement_flag_serialization() {
-        use neptune_cash::api::export::KeyType;
-        use neptune_cash::state::wallet::address::announcement_flag::AnnouncementFlag;
-        use neptune_cash::state::wallet::address::ReceivingAddress;
-
         let words = test_phrase();
         let entropy = wallet_entropy_from_phrase(&words).unwrap();
         let addr: ReceivingAddress = entropy.nth_receiving_address(0, KeyType::Generation);
@@ -217,9 +210,6 @@ mod tests {
 
     #[test]
     fn test_new_address_types_roundtrip_via_from_bech32m() {
-        use neptune_cash::application::config::network::Network;
-        use neptune_cash::state::wallet::address::ReceivingAddress;
-
         let words = test_phrase();
         let entropy = wallet_entropy_from_phrase(&words).unwrap();
         for kt in ["ec_hybrid", "viewing_address"] {

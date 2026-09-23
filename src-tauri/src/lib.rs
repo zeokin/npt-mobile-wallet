@@ -20,6 +20,33 @@ mod transaction;
 use std::sync::Mutex;
 use std::time::Instant;
 
+use neptune_consensus::block::block_header::BlockPow;
+use neptune_consensus::consensus_rule_set::ConsensusRuleSet;
+use neptune_consensus::transaction::announcement::Announcement;
+use neptune_consensus::transaction::transparent_input::TransparentInput;
+use neptune_consensus::transaction::utxo::Utxo;
+use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
+use neptune_mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
+use neptune_mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
+use neptune_primitives::block_height::BlockHeight;
+use neptune_primitives::network::Network;
+use neptune_primitives::tasm_lib::prelude::Digest;
+use neptune_primitives::tasm_lib::prelude::Tip5;
+use neptune_primitives::timestamp::Timestamp;
+use neptune_primitives::twenty_first::util_types::mmr::mmr_trait::Mmr;
+use neptune_rpc_api::api::rpc::RpcApi;
+use neptune_rpc_api::model::block::transaction_kernel::RpcAdditionRecord;
+use neptune_rpc_api::model::wallet::transaction::RpcTransaction;
+use neptune_wallet::address::ReceivingAddress;
+use neptune_wallet::address::SpendingKey;
+use neptune_wallet::transaction_details::TransactionDetails;
+use neptune_wallet::transaction_output::TxOutput;
+use neptune_wallet::transaction_output::TxOutputList;
+use neptune_wallet::unlocked_utxo::UnlockedUtxo;
+use neptune_wallet::wallet_entropy::WalletEntropy;
+use num_traits::CheckedAdd;
+use num_traits::CheckedSub;
+use num_traits::Zero;
 use rpc::RpcClient;
 use serde::Serialize;
 use tauri::Manager;
@@ -319,10 +346,7 @@ fn delete_wallet(app: tauri::AppHandle, state: State<'_, AppState>) -> Result<()
 // These run entirely on-device. No network calls needed.
 
 /// Helper: decrypt seed → mnemonic words → WalletEntropy
-fn get_wallet_entropy(
-    app: &tauri::AppHandle,
-    pin: &str,
-) -> Result<neptune_cash::state::wallet::wallet_entropy::WalletEntropy, String> {
+fn get_wallet_entropy(app: &tauri::AppHandle, pin: &str) -> Result<WalletEntropy, String> {
     let path = seed::seed_file_path(app)?;
     let encrypted = seed::load_seed_file(&path)?;
     let entropy_bytes = seed::decrypt_seed(&encrypted, pin)?;
@@ -451,18 +475,15 @@ async fn send_transaction(
     let entropy = get_wallet_entropy(&app, &pin)?;
 
     // Parse amounts
-    let amount_val = neptune_cash::api::export::NativeCurrencyAmount::coins_from_str(&amount)
+    let amount_val = NativeCurrencyAmount::coins_from_str(&amount)
         .map_err(|e| format!("Invalid amount: {}", e))?;
-    let fee_val = neptune_cash::api::export::NativeCurrencyAmount::coins_from_str(&fee)
-        .map_err(|e| format!("Invalid fee: {}", e))?;
+    let fee_val =
+        NativeCurrencyAmount::coins_from_str(&fee).map_err(|e| format!("Invalid fee: {}", e))?;
 
     // Parse recipient address
-    let network = neptune_cash::application::config::network::Network::Main;
-    let recipient = neptune_cash::state::wallet::address::ReceivingAddress::from_bech32m(
-        &recipient_address,
-        network,
-    )
-    .map_err(|e| format!("Invalid address: {}", e))?;
+    let network = Network::Main;
+    let recipient = ReceivingAddress::from_bech32m(&recipient_address, network)
+        .map_err(|e| format!("Invalid address: {}", e))?;
 
     // Step 1: Re-scan to get fresh UTXOs with spending data. Use the same
     // per-type window the UI scanned, so funds received at a freshly generated
@@ -479,17 +500,6 @@ async fn send_transaction(
     }
 
     // Early balance check + select UTXOs to cover amount
-    use neptune_cash::api::export::UnlockedUtxo;
-    use neptune_cash::prelude::triton_vm::prelude::Tip5;
-    use neptune_cash::prelude::twenty_first::util_types::mmr::mmr_trait::Mmr;
-    use neptune_cash::protocol::consensus::block::block_height::BlockHeight;
-    use neptune_cash::protocol::proof_abstractions::timestamp::Timestamp;
-    use neptune_cash::state::wallet::transaction_output::TxOutput;
-    use neptune_cash::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
-    use neptune_cash::util_types::mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
-    use num_traits::CheckedAdd;
-    use num_traits::CheckedSub;
-    use num_traits::Zero;
 
     let total_needed = amount_val
         .checked_add(&fee_val)
@@ -500,11 +510,11 @@ async fn send_transaction(
 
     // Deserialize all unspent UTXOs with their amounts
     struct UtxoInput {
-        utxo: neptune_cash::protocol::consensus::transaction::utxo::Utxo,
-        sender_randomness: neptune_cash::prelude::triton_vm::prelude::Digest,
-        receiver_preimage: neptune_cash::prelude::triton_vm::prelude::Digest,
+        utxo: Utxo,
+        sender_randomness: Digest,
+        receiver_preimage: Digest,
         aocl_leaf_index: u64,
-        amount: neptune_cash::api::export::NativeCurrencyAmount,
+        amount: NativeCurrencyAmount,
         data: sync::DiscoveredUtxo,
     }
 
@@ -535,7 +545,7 @@ async fn send_transaction(
 
     // Select UTXOs until we cover the needed amount
     let mut selected: Vec<UtxoInput> = Vec::new();
-    let mut accumulated = neptune_cash::api::export::NativeCurrencyAmount::zero();
+    let mut accumulated = NativeCurrencyAmount::zero();
     for input in all_inputs {
         accumulated = accumulated + input.amount;
         selected.push(input);
@@ -571,10 +581,11 @@ async fn send_transaction(
 
     // Step 3: Get chain tip
     debug_log!("[SEND] Step 3: Getting chain tip...");
-    use neptune_cash::application::json_rpc::core::api::rpc::RpcApi;
     let tip_resp = rpc.tip().await.map_err(|e| format!("tip: {}", e))?;
     let tip_height = u64::from(tip_resp.block.kernel.header.height);
     debug_log!("[SEND] Chain tip at height {}", tip_height);
+    transaction::ensure_no_imminent_hardfork(network, BlockHeight::from(tip_height))?;
+    let consensus_rule_set = ConsensusRuleSet::infer_from(network, BlockHeight::from(tip_height));
 
     // Step 4-7: For EACH selected UTXO: compute AOCL index, get membership proof, unlock
     debug_log!("[SEND] Steps 4-7: Processing {} inputs...", selected.len());
@@ -652,8 +663,7 @@ async fn send_transaction(
     // Step 8: Build outputs
     debug_log!("[SEND] Step 8: Building outputs...");
     let tip_block_height = BlockHeight::from(tip_height);
-    let change_key =
-        neptune_cash::state::wallet::address::SpendingKey::Symmetric(entropy.nth_symmetric_key(0));
+    let change_key = SpendingKey::Symmetric(entropy.nth_symmetric_key(0));
     let change_address = change_key.to_address();
 
     let recipient_privacy_digest = recipient.privacy_digest();
@@ -666,10 +676,9 @@ async fn send_transaction(
         false,
     );
 
-    let mut tx_outputs =
-        neptune_cash::state::wallet::transaction_output::TxOutputList::from(vec![recipient_output]);
+    let mut tx_outputs = TxOutputList::from(vec![recipient_output]);
     if let Some(change_amount) = accumulated.checked_sub(&total_needed) {
-        if change_amount > neptune_cash::api::export::NativeCurrencyAmount::zero() {
+        if change_amount > NativeCurrencyAmount::zero() {
             let change_privacy_digest = change_address.privacy_digest();
             let change_sender_randomness =
                 entropy.generate_sender_randomness(tip_block_height, change_privacy_digest);
@@ -687,14 +696,19 @@ async fn send_transaction(
     // Step 8.5: Lustration check (HF-β at block 38,000).
     // If the chain has a lustration barrier and any of our inputs fall at
     // or below the threshold, the supporter will reject the tx unless it
-    // carries lustration announcements. Generate them while we still hold
-    // a borrow of unlocked_utxos (it's moved into new_without_coinbase next).
-    use neptune_cash::api::export::Announcement;
-    use neptune_cash::protocol::consensus::block::block_header::BlockPow;
+    let transparent_inputs: Vec<TransparentInput> = selected
+        .iter()
+        .map(|input| TransparentInput {
+            utxo: input.utxo.clone(),
+            aocl_leaf_index: input.aocl_leaf_index,
+            sender_randomness: input.sender_randomness,
+            receiver_preimage: input.receiver_preimage,
+        })
+        .collect();
     let pow: BlockPow = tip_resp.block.kernel.header.pow.into();
     let lustration_status_result = pow.lustration_status();
     let lustration_announcements: Vec<Announcement> = match lustration_status_result {
-        Ok(status) => Announcement::lustration_announcements(status, &unlocked_utxos),
+        Ok(status) => Announcement::lustration_announcements(status, &transparent_inputs),
         Err(_) => vec![], // pre-HF-β chain, no lustration field
     };
     if !lustration_announcements.is_empty() && !accept_lustrations.unwrap_or(false) {
@@ -709,15 +723,14 @@ async fn send_transaction(
     // Step 9: Build TransactionDetails
     debug_log!("[SEND] Step 9: Building TransactionDetails...");
     let timestamp = Timestamp::now();
-    let mut transaction_details =
-        neptune_cash::api::export::TransactionDetails::new_without_coinbase(
-            unlocked_utxos,
-            tx_outputs,
-            fee_val,
-            timestamp,
-            tip_msa,
-            network,
-        );
+    let mut transaction_details = TransactionDetails::new_without_coinbase(
+        unlocked_utxos,
+        tx_outputs,
+        fee_val,
+        timestamp,
+        tip_msa,
+        network,
+    );
     if !lustration_announcements.is_empty() {
         debug_log!(
             "[SEND] Attaching {} lustration announcement(s)",
@@ -777,7 +790,7 @@ async fn send_transaction(
     // Keep session alive during long proof generation
     *state.last_activity.lock().unwrap() = Some(Instant::now());
     debug_log!("[SEND] Step 10: Generating ProofCollection — this may take several minutes...");
-    let tx = transaction::build_transaction(&transaction_details)
+    let tx = transaction::build_transaction(&transaction_details, consensus_rule_set)
         .await
         .map_err(|e| format!("ProofCollection failed: {}", e))?;
     // Keep session alive after proof generation
@@ -786,7 +799,8 @@ async fn send_transaction(
 
     // Step 11: Submit transaction
     debug_log!("[SEND] Step 11: Submitting transaction...");
-    let rpc_tx: neptune_cash::application::json_rpc::core::model::wallet::transaction::RpcTransaction = tx.try_into()
+    let rpc_tx: RpcTransaction = tx
+        .try_into()
         .map_err(|e: String| format!("Convert to RPC transaction: {}", e))?;
     let submit_resp = rpc
         .submit_transaction(rpc_tx)
@@ -801,7 +815,6 @@ async fn send_transaction(
     debug_log!("[SEND] Submitted!");
 
     // Return addition records as JSON for tracking confirmation via wasMined
-    use neptune_cash::application::json_rpc::core::model::block::transaction_kernel::RpcAdditionRecord;
     let kernel = transaction_details.transaction_kernel();
     let addition_jsons: Vec<String> = kernel
         .outputs
@@ -882,9 +895,6 @@ async fn check_transaction_mined(
 ) -> Result<Vec<u64>, String> {
     check_session(&state)?;
     let rpc = get_rpc(&state)?;
-
-    use neptune_cash::application::json_rpc::core::api::rpc::RpcApi;
-    use neptune_cash::application::json_rpc::core::model::block::transaction_kernel::RpcAdditionRecord;
 
     // Deserialize RpcAdditionRecords from JSON strings stored at send-time
     let mut addition_records = Vec::new();
@@ -1037,7 +1047,6 @@ fn get_rpc(state: &State<'_, AppState>) -> Result<RpcClient, String> {
 
 #[tauri::command]
 async fn get_block_height(state: State<'_, AppState>) -> Result<u64, String> {
-    use neptune_cash::application::json_rpc::core::api::rpc::RpcApi;
     let resp = get_rpc(&state)?
         .height()
         .await
