@@ -65,10 +65,6 @@ impl RpcClient {
         })
     }
 
-    pub(crate) fn url(&self) -> &str {
-        &self.url
-    }
-
     /// Ping the node: returns (network, tip height). Any RPC error is
     /// converted to a String so call sites don't need to match on RpcError.
     pub(crate) async fn test_connection(&self) -> Result<(String, u64), String> {

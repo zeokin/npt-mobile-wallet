@@ -114,7 +114,11 @@ jobs:
         # --apk skips the AAB build. The AAB rebuild uses different
         # feature flags, so cargo treats it as a fresh config and
         # duplicates the target dir, filling the runner's disk.
-        run: npx @tauri-apps/cli android build --apk --target aarch64 --target x86_64
+        # Use cargo-tauri for the whole build: Gradle calls back into
+        # `cargo tauri android android-studio-script`, and that must be the
+        # same CLI version as the outer command (a newer cargo-tauri expects
+        # a cli-options-server.json that the older npm CLI does not write).
+        run: cargo tauri android build --apk --target aarch64 --target x86_64
 
       - name: Upload unsigned APK as artifact
         uses: actions/upload-artifact@v4

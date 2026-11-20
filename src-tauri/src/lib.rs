@@ -1029,10 +1029,7 @@ async fn connect_node(
     let client = RpcClient::new(&url)?;
     let (network_name, block_height) = client.test_connection().await?;
     let network = keys::parse_network(&network_name)?;
-    debug_log!(
-        "[NODE] Connected to {} ({network}) at {block_height}",
-        client.url()
-    );
+    debug_log!("[NODE] Connected to {url} ({network}) at {block_height}");
     *state.rpc.lock().unwrap() = Some(client);
     *state.network.lock().unwrap() = network;
     Ok(ConnectionInfo {
