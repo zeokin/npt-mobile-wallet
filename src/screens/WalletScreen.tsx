@@ -72,10 +72,13 @@ export default function WalletScreen() {
   const tab = ADDR_TABS.find((t) => t.key === addrTab)!;
   const current = addresses?.[addrTab] ?? null;
 
-  // Balances (exact). Older stores lack the backend totals: derive from UTXOs.
+  // Balances (exact). Until the first sync with this version the backend
+  // totals are not known yet: derive them from the cached UTXOs.
+  const cachedSpendable = sumAmounts(
+    utxos.filter((u) => !u.likely_spent && !u.locked).map((u) => u.amount)
+  );
   const spendable =
-    parseAmount(spendableBalance) ??
-    sumAmounts(utxos.filter((u) => !u.likely_spent && !u.locked).map((u) => u.amount));
+    lastSyncAt > 0 ? (parseAmount(spendableBalance) ?? cachedSpendable) : cachedSpendable;
   const locked = parseAmount(lockedBalance) ?? 0n;
   const pendingTx = outgoingTxs.find((t) => t.status === "pending") ?? null;
   const pendingOut = pendingTx ? sumAmounts([pendingTx.amount, pendingTx.fee]) : 0n;
@@ -125,12 +128,17 @@ export default function WalletScreen() {
   useEffect(() => {
     const poll = async () => {
       setNow(Date.now());
-      if (!useSettingsStore.getState().connected) return;
+      const sending = useSendStore.getState().phase === "sending";
+      if (!useSettingsStore.getState().connected) {
+        // Lost the node (or never reached it): keep retrying quietly.
+        if (!isSyncing() && !sending) doSync({ notify: true, showErrors: false });
+        return;
+      }
       try {
         const height = await getBlockHeight();
         setBlockHeight(height);
         const { lastSyncHeight: synced } = useWalletStore.getState();
-        if (height > synced && !isSyncing() && useSendStore.getState().phase !== "sending") {
+        if (height > synced && !isSyncing() && !sending) {
           doSync({ notify: true, showErrors: false });
         }
       } catch {

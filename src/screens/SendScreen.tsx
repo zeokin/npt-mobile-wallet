@@ -151,7 +151,7 @@ function SendingOverlay() {
 export default function SendScreen() {
   const navigate = useNavigate();
   const { connected } = useSettingsStore();
-  const { utxos, spendableBalance } = useWalletStore();
+  const { utxos, spendableBalance, lastSyncAt } = useWalletStore();
   const phase = useSendStore((s) => s.phase);
   const result = useSendStore((s) => s.result);
   const sentRequest = useSendStore((s) => s.request);
@@ -208,7 +208,9 @@ export default function SendScreen() {
     .filter((u) => !u.likely_spent && !u.locked)
     .map((u) => parseAmount(u.amount) ?? 0n)
     .sort((a, b) => (b > a ? 1 : b < a ? -1 : 0));
-  const spendable = parseAmount(spendableBalance) ?? coins.reduce((a, b) => a + b, 0n);
+  const cachedSpendable = coins.reduce((a, b) => a + b, 0n);
+  const spendable =
+    lastSyncAt > 0 ? (parseAmount(spendableBalance) ?? cachedSpendable) : cachedSpendable;
   const largestCoins = coins.slice(0, MAX_INPUTS).reduce((a, b) => a + b, 0n);
   const sendableTotal = largestCoins < spendable ? largestCoins : spendable;
   const maxSendable = maxAtoms(sendableTotal - (feeAtoms ?? 0n), 0n);
@@ -224,7 +226,9 @@ export default function SendScreen() {
       amountError = `At most ${formatAmount(maxSendable, 8)} NPT fits in one transaction (${MAX_INPUTS} coins). Send the rest in a second transaction.`;
     }
   }
-  const feeError = feeAtoms === null ? "Enter a valid fee (up to 8 decimals)" : null;
+  // An empty custom fee blocks Continue but is not shown as an error yet.
+  const feeMissing = feeKey === "custom" && fee === "";
+  const feeError = !feeMissing && feeAtoms === null ? "Enter a valid fee (up to 8 decimals)" : null;
   const addressError = !checking && validation && !validation.valid ? validation.error : null;
   const canContinue =
     validation?.valid === true &&
@@ -233,6 +237,7 @@ export default function SendScreen() {
     amountAtoms > 0n &&
     !amountError &&
     !feeError &&
+    !feeMissing &&
     connected &&
     !pendingBlocked &&
     phase === "idle";

@@ -44,6 +44,8 @@ export default function App() {
                 "!bg-[var(--npt-success)] !text-white !border-transparent",
               error:
                 "!bg-[var(--npt-error)] !text-white !border-transparent",
+              actionButton:
+                "ml-auto shrink-0 rounded-full bg-white text-[var(--npt-error)] px-3 py-1 text-xs font-semibold",
             },
           }}
         />
