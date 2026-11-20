@@ -1,5 +1,6 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { getVersion } from "@tauri-apps/api/app";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { toast } from "sonner";
 import { ExternalLink, Eye, EyeOff, FileText, Shield, Link2, Lock } from "lucide-react";
@@ -16,10 +17,17 @@ export default function SettingsScreen() {
   const [seedWords, setSeedWords] = useState<string[]>([]);
   const [seedPin, setSeedPin] = useState("");
   const [showSeedPin, setShowSeedPin] = useState(false);
+  const [appVersion, setAppVersion] = useState("");
 
+  useEffect(() => {
+    getVersion().then(setAppVersion).catch(() => { });
+  }, []);
 
   const handleLock = async () => {
     try { await lockWallet(); await disconnectNode(); } catch { /* ignore */ }
+    // The supporter connection is gone; don't let the wallet think otherwise
+    // (it would skip reconnecting and the next sync would fail).
+    useSettingsStore.getState().reset();
     navigate("/unlock", { replace: true });
   };
 
@@ -164,7 +172,9 @@ export default function SettingsScreen() {
             <Lock size={16} />
             Lock Wallet
           </button>
-          <p className="text-xs text-center text-[var(--npt-muted)] pt-2">Neptune Cash Wallet v0.2.1</p>
+          <p className="text-xs text-center text-[var(--npt-muted)] pt-2">
+            Neptune Cash Wallet{appVersion ? ` v${appVersion}` : ""}
+          </p>
         </div>
       </div>
 

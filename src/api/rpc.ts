@@ -31,14 +31,31 @@ export interface MainAddresses {
 export const generateMainAddresses = (pin: string | null, network?: string) =>
   invoke<MainAddresses>("generate_main_addresses", { pin: pin || null, network: network || null });
 
-// UTXO scanning (uses supporter + local decryption)
-// PIN is optional — uses cached PIN from unlock if null
+// Recipient address validation (for the connected network).
+export interface AddressValidation {
+  valid: boolean;
+  key_type: string | null;
+  error: string | null;
+}
+export const validateAddress = (address: string) =>
+  invoke<AddressValidation>("validate_address", { address });
+
+// UTXO scanning (uses supporter + local decryption). The keys live in the
+// backend session; `pin` is ignored and kept for compatibility.
 export interface SyncResult {
   balance: string;
   utxo_count: number;
   blocks_scanned: number;
+  /// Spendable and spent UTXOs. Time-locked ones are in `locked_utxos`.
   utxos: DiscoveredUtxo[];
+  locked_utxos?: DiscoveredUtxo[];
+  /// Exact amounts (lossless decimal strings) computed by the backend.
+  spendable_balance?: string;
+  locked_balance?: string;
+  tip_height?: number;
+  scan_window?: ScanWindow;
 }
+/// Display data of an owned UTXO. Spending secrets never leave the backend.
 export interface DiscoveredUtxo {
   amount: string;
   block_height: number;
@@ -46,16 +63,17 @@ export interface DiscoveredUtxo {
   spent_in_block: number | null;
   key_type: string;
   key_index: number;
-  // Opaque to the frontend — we just pass these back to the backend if needed.
-  // The frontend should never parse these; they're typed Utxo/Digest JSON blobs.
-  utxo: unknown;
-  sender_randomness: unknown;
-  receiver_preimage: unknown;
   aocl_leaf_index: number | null;
+  /// Unspent but still time-locked.
+  locked?: boolean;
+  /// Time-lock release, ms since epoch.
+  release_date?: number | null;
+  /// Received at the wallet's own change key.
+  is_change?: boolean;
 }
 // Optional per-key-type scan window. Field names match the Rust `ScanWindow`
-// struct. The UI normally omits it (one main address per type → the backend's
-// light default window suffices); kept for callers that want a custom range.
+// struct. The UI normally omits it: the backend scans a look-ahead window per
+// type and widens it automatically when funds are found near its end.
 export interface ScanWindow {
   generation: number;
   ec_hybrid: number;
@@ -70,6 +88,9 @@ export const syncWallet = (pin: string | null, scanWindow?: ScanWindow) =>
 // selects inputs itself, so the UI doesn't need to pass UTXO indices.
 // `acceptLustrations` must be `true` on retry after the backend returned a
 // `LUSTRATION_REQUIRED:<threshold>` error.
+// Resolves to a JSON string: { success, txid, amount, fee, outputs,
+// attempts, addition_record_hexes }. Progress is emitted as `send_state`
+// events while the transaction is proven and broadcast.
 export const sendTransaction = (
   pin: string,
   recipientAddress: string,

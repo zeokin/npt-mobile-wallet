@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { ChevronLeft, ScanLine, Info, AlertCircle, Eye, EyeOff, Clock } from "lucide-react";
@@ -21,6 +21,9 @@ export default function SendScreen() {
   const [step, setStep] = useState<"form" | "confirm" | "building" | "lustration">("form");
   const [pendingBlocked, setPendingBlocked] = useState(false);
   const [lustrationThreshold, setLustrationThreshold] = useState<string | null>(null);
+  // Synchronous guard: state updates are async, so a double tap (or Enter +
+  // tap) could otherwise start two sends before `loading` re-renders.
+  const sendingRef = useRef(false);
 
   useEffect(() => {
     hasPendingTx().then(setPendingBlocked).catch(() => { });
@@ -59,6 +62,8 @@ export default function SendScreen() {
   // kept around between the first attempt and the lustration retry so the
   // user doesn't have to re-enter it; it's cleared on any terminal outcome.
   const submitSend = async (acceptLustrations: boolean) => {
+    if (sendingRef.current) return;
+    sendingRef.current = true;
     setStep("building");
     setLoading(true);
     setStatus("Building transaction...");
@@ -106,6 +111,7 @@ export default function SendScreen() {
         toast.error(msg, { duration: 10000 });
       }
     } finally {
+      sendingRef.current = false;
       setLoading(false);
     }
   };

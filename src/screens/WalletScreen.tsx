@@ -19,7 +19,10 @@ import { useWalletStore, type ReceiveKeyType } from "../store/wallet-store";
 import NavBar from "../components/ui/NavBar";
 
 const DEFAULT_SUPPORTER = "https://wallet.neptunefundamentals.org";
-const STALE_PENDING_BLOCKS = 20;
+// Nodes drop an unconfirmed transaction from their mempool after 10 hours.
+// Only after that (plus a margin) can a never-confirmed send be treated as
+// dropped; clearing it earlier could hide a payment that still confirms.
+const STALE_PENDING_SECONDS = 12 * 60 * 60;
 
 // Receive address tabs. Generation is long (copy only); EC-hybrid and viewing
 // are short and get a QR code.
@@ -88,7 +91,7 @@ export default function WalletScreen() {
     if (store.loadOutgoingFromAppData) store.loadOutgoingFromAppData();
   }, []);
 
-  const resolvePendingTx = useCallback(async (currentBlockHeight: number): Promise<boolean> => {
+  const resolvePendingTx = useCallback(async (): Promise<boolean> => {
     const isPending = await hasPendingTx();
     if (!isPending) {
       setPendingBlocked(false);
@@ -118,12 +121,11 @@ export default function WalletScreen() {
           return false;
         }
 
-        if (pendingTimestamp > 0 && currentBlockHeight > 0) {
+        if (pendingTimestamp > 0) {
           const now = Math.floor(Date.now() / 1000);
           const secondsSinceSend = now - pendingTimestamp;
-          const estimatedBlocksSinceSend = Math.floor(secondsSinceSend / 600);
 
-          if (estimatedBlocksSinceSend >= STALE_PENDING_BLOCKS) {
+          if (secondsSinceSend >= STALE_PENDING_SECONDS) {
             await clearPendingTx();
             const store = useWalletStore.getState();
             const updated = store.outgoingTxs.filter((t) => t.status !== "pending");
@@ -177,8 +179,7 @@ export default function WalletScreen() {
         toast.success(`Received ${newUtxos.length} new UTXO(s)!`);
       }
 
-      const currentHeight = useSettingsStore.getState().blockHeight || 0;
-      await resolvePendingTx(currentHeight);
+      await resolvePendingTx();
     } catch (e) {
       setSyncInfo(null);
       if (showToast) toast.error(String(e));
@@ -246,11 +247,15 @@ export default function WalletScreen() {
     return () => clearInterval(interval);
   }, [connected]);
 
-  const handleCopyTabAddress = () => {
+  const handleCopyTabAddress = async () => {
     if (!tabAddress) return;
     // Copy the raw lowercase bech32m address (not the uppercased QR payload).
-    navigator.clipboard.writeText(tabAddress);
-    toast.success("Address copied!");
+    try {
+      await navigator.clipboard.writeText(tabAddress);
+      toast.success("Address copied!");
+    } catch {
+      toast.error("Could not copy the address");
+    }
   };
 
   const tabAddressDisplay = tabAddress
@@ -278,7 +283,7 @@ export default function WalletScreen() {
         </div>
 
         <div className="h-1/4 relative py-10 w-full">
-          {(
+          {pendingOutgoing > 0 && (
             <PendingBubble amount={pendingOutgoing.toFixed(4)} />
           )}
           <img

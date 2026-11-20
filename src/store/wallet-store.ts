@@ -96,6 +96,33 @@ export const useWalletStore = create<WalletState>()(
         });
       },
     }),
-    { name: "npt-wallet" }
+    {
+      name: "npt-wallet",
+      version: 1,
+      // Persist data only — never transient UI flags.
+      partialize: (state) => ({
+        balance: state.balance,
+        utxos: state.utxos,
+        outgoingTxs: state.outgoingTxs,
+        mainAddresses: state.mainAddresses,
+        lastSyncHeight: state.lastSyncHeight,
+      }),
+      // v0 stored each UTXO's spending secrets (utxo, sender_randomness,
+      // receiver_preimage) in localStorage. The backend no longer sends them;
+      // strip any that an older version left behind.
+      migrate: (persisted: unknown, version: number) => {
+        const state = (persisted ?? {}) as Record<string, unknown>;
+        if (version < 1 && Array.isArray(state.utxos)) {
+          state.utxos = (state.utxos as Record<string, unknown>[]).map((u) => {
+            const copy = { ...u };
+            delete copy.utxo;
+            delete copy.sender_randomness;
+            delete copy.receiver_preimage;
+            return copy;
+          });
+        }
+        return state as unknown as WalletState;
+      },
+    }
   )
 );
