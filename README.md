@@ -8,10 +8,12 @@ All private keys are derived and stored locally on the device. Transactions are 
 
 - `src/` — React + TypeScript frontend
   - `screens/` — page components (Wallet, Send, History, Settings, Unlock, …)
-  - `store/` — Zustand state (wallet, settings)
+  - `store/` — Zustand state (wallet, settings, send in progress)
   - `api/rpc.ts` — Tauri invoke wrappers
-  - `hooks/` — React hooks (session guard)
-  - `components/ui/` — shared UI components (NavBar, logo, …)
+  - `lib/` — shared logic: exact amount math, sync, pending transactions, send, node
+  - `hooks/` — React hooks (session guard and background lock, screenshot protection, pull to refresh)
+  - `components/` — sheets (addresses, pending transaction, history details, change password)
+  - `components/ui/` — shared UI components (NavBar, bottom sheet, QR code, toggle, …)
 - `src-tauri/` — Rust backend (neptune-core crates 0.20.x, Triton VM 9)
   - `src/lib.rs` — Tauri commands and app state
   - `src/session.rs` — unlocked-wallet session, auto-lock clock, password-attempt limiter
@@ -19,6 +21,8 @@ All private keys are derived and stored locally on the device. Transactions are 
   - `src/keys.rs` — local key derivation, per-session key cache, address validation
   - `src/sync.rs` — privacy-preserving UTXO scan (flag-based + local decryption, block cache)
   - `src/send.rs` — send pipeline (input selection, membership proofs, retries, submission)
+  - `src/meta.rs` — per-wallet address counters ("New address")
+  - `src/android.rs` — Android-only helpers via JNI (screenshot protection, clipboard)
   - `src/transaction.rs` — ProofCollection proving for sends
   - `src/rpc.rs` — JSON-RPC client for supporter node
   - `gen/android/` — generated Android project (gradle, manifest, Kotlin shims)

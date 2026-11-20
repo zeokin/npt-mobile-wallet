@@ -1,35 +1,55 @@
 import { invoke } from "@tauri-apps/api/core";
 
-// Seed management
+// ── Wallet lifecycle ──────────────────────────────────────────
 export const walletExists = () => invoke<boolean>("wallet_exists");
-export const createWallet = (pin: string) => invoke<string[]>("create_wallet", { pin });
+// Creating a wallet is two-step: the generated wallet is saved to the device
+// only after the backup quiz has been passed (`finishNewWallet`).
+export const prepareNewWallet = (pin: string) => invoke<string[]>("prepare_new_wallet", { pin });
+export const finishNewWallet = () => invoke<void>("finish_new_wallet");
+export const discardNewWallet = () => invoke<void>("discard_new_wallet");
 export const importWallet = (words: string, pin: string) => invoke<void>("import_wallet", { words, pin });
 export const unlockWallet = (pin: string) => invoke<void>("unlock_wallet", { pin });
 export const lockWallet = () => invoke<void>("lock_wallet");
 export const exportSeedPhrase = (pin: string) => invoke<string[]>("export_seed_phrase", { pin });
 export const deleteWallet = () => invoke<void>("delete_wallet");
+export const changePassword = (oldPin: string, newPin: string) =>
+  invoke<void>("change_password", { oldPin, newPin });
 
-// Session management
+// Seed words typing help (BIP39 English word list).
+export interface SeedWordsCheck {
+  /// 0-based positions of words that are not in the word list.
+  invalid: number[];
+  complete: boolean;
+  /// Complete, every word known, and the checksum matches.
+  valid: boolean;
+  error: string | null;
+}
+export const checkSeedWords = (words: string[]) => invoke<SeedWordsCheck>("check_seed_words", { words });
+export const suggestSeedWords = (prefix: string) => invoke<string[]>("suggest_seed_words", { prefix });
+
+// ── Session ───────────────────────────────────────────────────
 export const isSessionValid = () => invoke<boolean>("is_session_valid");
 export const touchActivity = () => invoke<void>("touch_activity");
+/// Auto-lock timeout in seconds.
+export const getAutoLock = () => invoke<number>("get_auto_lock");
+export const setAutoLock = (seconds: number) => invoke<void>("set_auto_lock", { seconds });
 
-// Local key derivation (on-device, no network needed)
-// PIN is optional — uses cached PIN from unlock if null
-export const generateLocalAddress = (pin: string | null, index: number, keyType?: string, network?: string) =>
-  invoke<string>("generate_local_address", {
-    pin: pin || null, index, keyType: keyType || null, network: network || null
-  });
-
-// The wallet's three main addresses (index 0 of each type). Generated once on
-// unlock/import (off the main thread) and cached in the store, so the wallet
-// shows them instantly without re-deriving on every visit.
-export interface MainAddresses {
-  generation: string;
-  ec_hybrid: string;
-  viewing_address: string;
+// ── Receiving addresses ───────────────────────────────────────
+export interface AddressEntry {
+  index: number;
+  address: string;
 }
-export const generateMainAddresses = (pin: string | null, network?: string) =>
-  invoke<MainAddresses>("generate_main_addresses", { pin: pin || null, network: network || null });
+/// The address shown for receiving, per type (the newest handed out).
+export interface CurrentAddresses {
+  generation: AddressEntry;
+  ec_hybrid: AddressEntry;
+  viewing_address: AddressEntry;
+}
+export const currentAddresses = () => invoke<CurrentAddresses>("current_addresses");
+/// Every handed-out address of a type, newest first.
+export const listAddresses = (keyType: string) => invoke<AddressEntry[]>("list_addresses", { keyType });
+/// Hand out a fresh address (one per payer improves privacy).
+export const newAddress = (keyType: string) => invoke<AddressEntry>("new_address", { keyType });
 
 // Recipient address validation (for the connected network).
 export interface AddressValidation {
@@ -40,8 +60,13 @@ export interface AddressValidation {
 export const validateAddress = (address: string) =>
   invoke<AddressValidation>("validate_address", { address });
 
-// UTXO scanning (uses supporter + local decryption). The keys live in the
-// backend session; `pin` is ignored and kept for compatibility.
+// ── Device ────────────────────────────────────────────────────
+/// Block screenshots / recent-apps preview while secrets are on screen.
+export const setSecureScreen = (enabled: boolean) => invoke<void>("set_secure_screen", { enabled });
+/// Read the clipboard (the WebView cannot read it on Android).
+export const readClipboard = () => invoke<string | null>("read_clipboard");
+
+// ── Sync ──────────────────────────────────────────────────────
 export interface SyncResult {
   balance: string;
   utxo_count: number;
@@ -59,6 +84,8 @@ export interface SyncResult {
 export interface DiscoveredUtxo {
   amount: string;
   block_height: number;
+  /// Time of the receiving block, ms since epoch.
+  block_time?: number | null;
   likely_spent: boolean;
   spent_in_block: number | null;
   key_type: string;
@@ -71,9 +98,8 @@ export interface DiscoveredUtxo {
   /// Received at the wallet's own change key.
   is_change?: boolean;
 }
-// Optional per-key-type scan window. Field names match the Rust `ScanWindow`
-// struct. The UI normally omits it: the backend scans a look-ahead window per
-// type and widens it automatically when funds are found near its end.
+// Optional per-key-type scan window. The backend scans every handed-out
+// address plus a look-ahead and widens it when funds are found near its end.
 export interface ScanWindow {
   generation: number;
   ec_hybrid: number;
@@ -81,53 +107,78 @@ export interface ScanWindow {
   symmetric: number;
 }
 
-export const syncWallet = (pin: string | null, scanWindow?: ScanWindow) =>
-  invoke<SyncResult>("sync_wallet", { pin: pin || null, scanWindow: scanWindow ?? null });
+export const syncWallet = (scanWindow?: ScanWindow) =>
+  invoke<SyncResult>("sync_wallet", { pin: null, scanWindow: scanWindow ?? null });
+/// Forget the scan cache; the next sync downloads everything again.
+export const rescanWallet = () => invoke<void>("rescan_wallet");
 
-// Send a transaction. The backend re-scans for all unspent UTXOs and
-// selects inputs itself, so the UI doesn't need to pass UTXO indices.
-// `acceptLustrations` must be `true` on retry after the backend returned a
-// `LUSTRATION_REQUIRED:<threshold>` error.
-// Resolves to a JSON string: { success, txid, amount, fee, outputs,
-// attempts, addition_record_hexes }. Progress is emitted as `send_state`
-// events while the transaction is proven and broadcast.
-export const sendTransaction = (
+// ── Send ──────────────────────────────────────────────────────
+/// Progress events emitted as `send_state` while a transaction is built.
+export interface SendProgress {
+  stage: "preparing" | "proving" | "rebuilding" | "broadcasting" | "done";
+  attempt: number;
+  max_attempts: number;
+  proof: string | null;
+  proof_index: number;
+  proof_total: number;
+}
+export interface TxOutputInfo {
+  /// Canonical commitment (hex), identifies the output on explorers.
+  commitment: string;
+  amount: string;
+  is_change: boolean;
+  address: string | null;
+}
+export interface SendResult {
+  success: boolean;
+  txid: string;
+  amount: string;
+  fee: string;
+  outputs: TxOutputInfo[];
+  attempts: number;
+  addition_record_hexes: string[];
+}
+// The backend re-scans and selects inputs itself. `acceptLustrations` must be
+// true on retry after a `LUSTRATION_REQUIRED:<threshold>` error.
+export const sendTransaction = async (
   pin: string,
   recipientAddress: string,
   amount: string,
   fee: string,
   acceptLustrations: boolean,
-  scanWindow?: ScanWindow,
-) =>
-  invoke<string>("send_transaction", {
+): Promise<SendResult> => {
+  const json = await invoke<string>("send_transaction", {
     pin,
     recipientAddress,
     amount,
     fee,
     acceptLustrations,
-    scanWindow: scanWindow ?? null,
+    scanWindow: null,
   });
+  return JSON.parse(json) as SendResult;
+};
 
 // Check if a transaction was mined (by its output addition records)
 export const checkTransactionMined = (additionRecordHexes: string[]) =>
   invoke<number[]>("check_transaction_mined", { additionRecordHexes });
 
-// Pending transaction guard (prevents double-spend)
+// Pending transaction guard (one pending transaction at a time)
 export const hasPendingTx = () => invoke<boolean>("has_pending_tx");
 export const loadPendingTx = () => invoke<string>("load_pending_tx");
 export const clearPendingTx = () => invoke<void>("clear_pending_tx");
 
-// Save/load outgoing history to Tauri app data (survives localStorage clear)
+// Outgoing history mirrored in app data (survives a WebView storage clear)
 export const saveOutgoingHistory = (historyJson: string) =>
   invoke<void>("save_outgoing_history", { historyJson });
-export const loadOutgoingHistory = () =>
-  invoke<string>("load_outgoing_history");
+export const loadOutgoingHistory = () => invoke<string>("load_outgoing_history");
 
-// Supporter connection
-export interface ConnectionInfo { network: string; block_height: number; }
-export const connectNode = (url: string, authToken?: string) =>
-  invoke<ConnectionInfo>("connect_node", { url, authToken: authToken || null });
+// ── Node ──────────────────────────────────────────────────────
+export interface ConnectionInfo {
+  network: string;
+  block_height: number;
+}
+export const connectNode = (url: string) => invoke<ConnectionInfo>("connect_node", { url, authToken: null });
+/// Check a node without switching to it.
+export const testNode = (url: string) => invoke<ConnectionInfo>("test_node", { url });
 export const disconnectNode = () => invoke<void>("disconnect_node");
-
-// Chain queries
 export const getBlockHeight = () => invoke<number>("get_block_height");

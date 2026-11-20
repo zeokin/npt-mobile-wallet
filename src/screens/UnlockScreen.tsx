@@ -2,16 +2,13 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { Eye, EyeOff } from "lucide-react";
-import { unlockWallet, deleteWallet, connectNode, generateMainAddresses, hasPendingTx } from "../api/rpc";
-import { useSettingsStore } from "../store/settings-store";
-import { useWalletStore } from "../store/wallet-store";
+import { unlockWallet, deleteWallet, hasPendingTx } from "../api/rpc";
+import { connectToNode } from "../lib/node";
+import { refreshAddresses } from "../lib/sync";
 import NeptuneLogo from "../components/ui/NeptuneLogo";
-
-const DEFAULT_SUPPORTER = "https://wallet.neptunefundamentals.org";
 
 export default function UnlockScreen() {
   const navigate = useNavigate();
-  const { setConnected, network } = useSettingsStore();
   const [pin, setPin] = useState("");
   const [showPin, setShowPin] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -63,26 +60,16 @@ export default function UnlockScreen() {
     try {
       await unlockWallet(pin);
 
-      // Auto-connect to default supporter
-      let net = network;
+      // Connect to the configured node (non-fatal: the wallet retries on sync).
       try {
-        const info = await connectNode(DEFAULT_SUPPORTER);
-        setConnected(true, info.network, info.block_height);
-        net = info.network || net;
+        await connectToNode();
       } catch {
-        // Continue even if connection fails — user can connect manually
+        /* the wallet shows "Offline · tap to retry" */
       }
 
-      // Generate the three main addresses ONCE, off the main thread, before
-      // showing the wallet. WalletScreen then reads them from cache instantly
-      // (no per-visit derivation, which used to freeze the UI). Non-fatal: if it
-      // fails, WalletScreen retries.
-      try {
-        const addrs = await generateMainAddresses(null, net || "main");
-        useWalletStore.getState().setMainAddresses(addrs);
-      } catch {
-        /* WalletScreen has a fallback */
-      }
+      // Derive the receiving addresses once, off the main thread, so the
+      // wallet shows them instantly. Non-fatal: WalletScreen retries.
+      await refreshAddresses();
 
       navigate("/wallet", { replace: true, state: { freshUnlock: true } });
     } catch (e) {
@@ -136,6 +123,7 @@ export default function UnlockScreen() {
           <div className="border-b border-t border-white/90 flex items-center">
             <input
               type={showPin ? "text" : "password"}
+              autoComplete="off"
               placeholder={locked ? "" : "Enter your password"}
               value={pin}
               onChange={(e) => !locked && setPin(e.target.value)}

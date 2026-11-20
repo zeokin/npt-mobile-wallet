@@ -1,9 +1,11 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { ChevronLeft, Eye, EyeOff } from "lucide-react";
-import { createWallet, deleteWallet } from "../api/rpc";
+import { discardNewWallet, finishNewWallet, prepareNewWallet } from "../api/rpc";
 import { useWalletStore } from "../store/wallet-store";
+import { useSecureScreen } from "../hooks/useSecureScreen";
+import { getPasswordStrength, MIN_PASSWORD_LENGTH } from "../lib/password";
 import NeptuneLogo from "../components/ui/NeptuneLogo";
 import NeptuneText from "../components/ui/NeptuneText";
 
@@ -16,21 +18,6 @@ function pickRandom(max: number, count: number, exclude?: number): number[] {
     if (r !== exclude && !indices.includes(r)) indices.push(r);
   }
   return indices;
-}
-
-function getPasswordStrength(pw: string): { label: string; color: string; width: string } {
-  if (pw.length === 0) return { label: "", color: "", width: "0%" };
-  let score = 0;
-  if (pw.length >= 8) score++;
-  if (pw.length >= 12) score++;
-  if (/[a-z]/.test(pw) && /[A-Z]/.test(pw)) score++;
-  if (/\d/.test(pw)) score++;
-  if (/[^a-zA-Z0-9]/.test(pw)) score++;
-
-  if (score <= 1) return { label: "Weak", color: "var(--npt-error)", width: "25%" };
-  if (score <= 2) return { label: "Fair", color: "var(--npt-warning)", width: "50%" };
-  if (score <= 3) return { label: "Good", color: "var(--npt-blue)", width: "75%" };
-  return { label: "Strong", color: "var(--npt-success)", width: "100%" };
 }
 
 export default function SeedCreateScreen() {
@@ -49,6 +36,19 @@ export default function SeedCreateScreen() {
   const [quizPositions, setQuizPositions] = useState<number[]>([]);
   const [selectedAnswer, setSelectedAnswer] = useState<string | null>(null);
   const [showResult, setShowResult] = useState(false);
+  const [finishing, setFinishing] = useState(false);
+  // Set once the wallet is saved; until then leaving the screen discards it.
+  const savedRef = useRef(false);
+
+  // The seed words are secret: no screenshots while they (or the quiz) show.
+  useSecureScreen(step !== "password");
+
+  // Leaving without finishing the quiz must not keep the generated wallet.
+  useEffect(() => {
+    return () => {
+      if (!savedRef.current) discardNewWallet().catch(() => {});
+    };
+  }, []);
 
   const quizOptions = useMemo(() => {
     if (words.length === 0 || quizPositions.length === 0) return [];
@@ -69,8 +69,8 @@ export default function SeedCreateScreen() {
   const strength = getPasswordStrength(pin);
 
   const handleCreateWallet = async () => {
-    if (pin.length < 8) {
-      toast.error("Password must be at least 8 characters");
+    if (pin.length < MIN_PASSWORD_LENGTH) {
+      toast.error(`Password must be at least ${MIN_PASSWORD_LENGTH} characters`);
       return;
     }
     if (pin !== confirmPin) {
@@ -80,7 +80,8 @@ export default function SeedCreateScreen() {
     }
     setLoading(true);
     try {
-      const w = await createWallet(pin);
+      // Generated in memory only; saved after the backup quiz.
+      const w = await prepareNewWallet(pin);
       setWords(w);
       const positions = pickRandom(w.length, TOTAL_QUESTIONS);
       setQuizPositions(positions);
@@ -116,10 +117,23 @@ export default function SeedCreateScreen() {
     }
 
     if (quizIndex + 1 >= TOTAL_QUESTIONS) {
-      useWalletStore.getState().reset();
-      toast.success("Wallet created successfully!");
-      // Same as import — silent initial sync for a freshly created wallet.
-      navigate("/wallet", { replace: true, state: { freshImport: true } });
+      if (finishing) return;
+      setFinishing(true);
+      try {
+        // The backup is verified: now the wallet is saved to the device.
+        await finishNewWallet();
+        savedRef.current = true;
+        setPin("");
+        setConfirmPin("");
+        useWalletStore.getState().reset();
+        toast.success("Wallet created successfully!");
+        // Same as import — silent initial sync for a freshly created wallet.
+        navigate("/wallet", { replace: true, state: { freshImport: true } });
+      } catch (e) {
+        toast.error(String(e));
+      } finally {
+        setFinishing(false);
+      }
     } else {
       setQuizIndex(quizIndex + 1);
       setSelectedAnswer(null);
@@ -128,7 +142,8 @@ export default function SeedCreateScreen() {
   };
 
   const handleCancel = async () => {
-    try { await deleteWallet(); } catch { /* ignore */ }
+    // Nothing was saved yet: just forget the generated wallet.
+    try { await discardNewWallet(); } catch { /* ignore */ }
     navigate("/", { replace: true });
   };
 
@@ -355,7 +370,8 @@ export default function SeedCreateScreen() {
               {showResult && (
                 <button
                   onClick={handleQuizNext}
-                  className="flex-1 w-1/2 py-1 rounded-full bg-[var(--npt-blue)] text-white font-semibold"
+                  disabled={finishing}
+                  className="flex-1 w-1/2 py-1 rounded-full bg-[var(--npt-blue)] text-white font-semibold disabled:opacity-60"
                 >
                   {isCorrect
                     ? quizIndex + 1 >= TOTAL_QUESTIONS
