@@ -17,8 +17,12 @@ use serde::Serialize;
 
 use crate::keys::KeyCache;
 
-/// Session auto-lock after this many seconds without user activity.
-pub(crate) const SESSION_TIMEOUT_SECS: u64 = 180;
+/// Default auto-lock: this many seconds without user activity.
+pub(crate) const DEFAULT_AUTO_LOCK_SECS: u64 = 180;
+
+/// Allowed range for the user-chosen auto-lock timeout.
+pub(crate) const MIN_AUTO_LOCK_SECS: u64 = 30;
+pub(crate) const MAX_AUTO_LOCK_SECS: u64 = 3600;
 
 /// Failed password attempts allowed before the first cooldown.
 pub(crate) const MAX_PASSWORD_ATTEMPTS: u32 = 5;
@@ -74,8 +78,45 @@ impl Session {
         self.last_activity = activity_clock_secs();
     }
 
-    pub(crate) fn is_expired(&self) -> bool {
-        activity_clock_secs().saturating_sub(self.last_activity) > SESSION_TIMEOUT_SECS
+    pub(crate) fn is_expired(&self, timeout_secs: u64) -> bool {
+        activity_clock_secs().saturating_sub(self.last_activity) > timeout_secs
+    }
+}
+
+/// App-wide settings kept by the backend (not tied to a particular wallet).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub(crate) struct AppSettings {
+    pub(crate) auto_lock_secs: u64,
+}
+
+impl Default for AppSettings {
+    fn default() -> Self {
+        Self {
+            auto_lock_secs: DEFAULT_AUTO_LOCK_SECS,
+        }
+    }
+}
+
+impl AppSettings {
+    fn file_path(dir: &Path) -> PathBuf {
+        dir.join("app_settings.json")
+    }
+
+    pub(crate) fn load(dir: &Path) -> Self {
+        let settings: Self = std::fs::read(Self::file_path(dir))
+            .ok()
+            .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+            .unwrap_or_default();
+        Self {
+            auto_lock_secs: settings
+                .auto_lock_secs
+                .clamp(MIN_AUTO_LOCK_SECS, MAX_AUTO_LOCK_SECS),
+        }
+    }
+
+    pub(crate) fn save(&self, dir: &Path) -> Result<(), String> {
+        let bytes = serde_json::to_vec(self).map_err(|e| format!("Encode settings: {e}"))?;
+        crate::seed::write_file_atomic(&Self::file_path(dir), &bytes)
     }
 }
 
@@ -203,6 +244,25 @@ mod tests {
         limiter.record_failure(5);
         limiter.save(&dir);
         assert_eq!(limiter, PasswordLimiter::load(&dir));
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn app_settings_are_clamped_and_persisted() {
+        let dir = std::env::temp_dir().join(format!("npt-settings-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        assert_eq!(
+            DEFAULT_AUTO_LOCK_SECS,
+            AppSettings::load(&dir).auto_lock_secs
+        );
+        AppSettings {
+            auto_lock_secs: 300,
+        }
+        .save(&dir)
+        .unwrap();
+        assert_eq!(300, AppSettings::load(&dir).auto_lock_secs);
+        AppSettings { auto_lock_secs: 5 }.save(&dir).unwrap();
+        assert_eq!(MIN_AUTO_LOCK_SECS, AppSettings::load(&dir).auto_lock_secs);
         std::fs::remove_dir_all(&dir).unwrap();
     }
 

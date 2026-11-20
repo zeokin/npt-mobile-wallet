@@ -65,6 +65,12 @@ libc = "0.2"
 [target.'cfg(any(target_os = "android", target_os = "ios"))'.dependencies]
 tauri-plugin-barcode-scanner = "2"
 
+# Android-only: JNI calls on the UI thread for screenshot protection
+# (FLAG_SECURE) on seed screens and for reading the clipboard ("Paste").
+# Same version as wry's, so the JNIEnv/JObject types match.
+[target.'cfg(target_os = "android")'.dependencies]
+jni = "0.21"
+
 # triton-vm's build script (build.rs) does heavy recursive codegen
 # (Constraints::all → degree lowering → syn/prettyplease over huge expression
 # trees) and overflows the Windows main-thread stack (1 MB) when built at

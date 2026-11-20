@@ -81,7 +81,7 @@ const MAX_SCAN_INDEX: u64 = 2_000;
 const MAX_WINDOW_ROUNDS: usize = 6;
 
 /// On-disk format version of [`ScanCache`]. Bump to invalidate old caches.
-const SCAN_CACHE_VERSION: u32 = 1;
+const SCAN_CACHE_VERSION: u32 = 2;
 
 const SCAN_CACHE_FILE: &str = "scan_cache.bin";
 
@@ -133,11 +133,11 @@ impl ScanWindow {
     }
 
     /// The gap kept after the highest used index of a key type.
-    fn gap(key_type: KeyType) -> u64 {
+    pub(crate) fn gap(key_type: KeyType) -> u64 {
         Self::default().get(key_type).max(1)
     }
 
-    fn max(self, other: Self) -> Self {
+    pub(crate) fn max(self, other: Self) -> Self {
         Self {
             generation: self.generation.max(other.generation),
             ec_hybrid: self.ec_hybrid.max(other.ec_hybrid),
@@ -168,6 +168,8 @@ pub(crate) struct DiscoveredUtxo {
     pub(crate) aocl_leaf_index: u64,
     /// Block height where this UTXO was confirmed (received).
     pub(crate) block_height: u64,
+    /// Timestamp of that block, milliseconds since the Unix epoch.
+    pub(crate) block_time: Option<u64>,
     pub(crate) key_type: KeyType,
     pub(crate) key_index: u64,
     /// Whether the UTXO has been spent on the canonical chain.
@@ -203,6 +205,7 @@ impl DiscoveredUtxo {
         UtxoView {
             amount: self.amount().display_lossless(),
             block_height: self.block_height,
+            block_time: self.block_time,
             likely_spent: self.spent,
             spent_in_block: self.spent_in_block,
             key_type: keys::key_type_label(self.key_type),
@@ -223,6 +226,8 @@ impl DiscoveredUtxo {
 pub(crate) struct UtxoView {
     pub(crate) amount: String,
     pub(crate) block_height: u64,
+    /// Time of the receiving block, milliseconds since the Unix epoch.
+    pub(crate) block_time: Option<u64>,
     pub(crate) likely_spent: bool,
     pub(crate) spent_in_block: Option<u64>,
     pub(crate) key_type: String,
@@ -312,6 +317,8 @@ impl ScanOutcome {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 struct CachedBlock {
     digest: Digest,
+    /// Block timestamp, milliseconds since the Unix epoch.
+    timestamp_ms: u64,
     /// AOCL leaf count before this block's outputs.
     aocl_prior: u64,
     /// Canonical commitments of the transaction's outputs, in AOCL order.
@@ -419,6 +426,7 @@ fn check_premine(keys: &[(KeyType, u64, SpendingKey)], network: Network) -> Vec<
                 receiver_preimage: key.privacy_preimage(),
                 aocl_leaf_index: aocl_leaf_index as u64,
                 block_height: 0,
+                block_time: None,
                 key_type: *key_type,
                 key_index: *key_index,
                 spent: false,
@@ -507,6 +515,7 @@ fn scan_block(
             receiver_preimage: inc.receiver_preimage,
             aocl_leaf_index: block.aocl_prior + position as u64,
             block_height: height,
+            block_time: Some(block.timestamp_ms),
             key_type,
             key_index,
             spent: false,
@@ -537,6 +546,7 @@ async fn fetch_block(rpc: &RpcClient, height: u64) -> Result<CachedBlock, String
     }
     Ok(CachedBlock {
         digest,
+        timestamp_ms: kernel.header.timestamp.to_millis(),
         aocl_prior: kernel.body.num_aocl_leafs_prior(),
         outputs: transaction_kernel
             .outputs
@@ -890,6 +900,7 @@ mod tests {
         announcements.extend(extra_announcements);
         CachedBlock {
             digest: Digest::default(),
+            timestamp_ms: 0,
             aocl_prior,
             outputs: outputs
                 .iter()
@@ -999,6 +1010,7 @@ mod tests {
             .canonical_commitment;
         let block = CachedBlock {
             digest: Digest::default(),
+            timestamp_ms: 0,
             aocl_prior: 0,
             outputs: vec![commitment],
             announcements: vec![announcement],

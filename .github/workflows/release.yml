@@ -79,6 +79,11 @@ jobs:
 
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          # The action's default also installs the legacy "tools" package,
+          # which Google removed from the SDK repository (sdkmanager then
+          # fails with "Failed to find package 'tools'").
+          packages: 'platform-tools'
 
       - name: Install Android NDK
         run: echo "y" | sdkmanager "ndk;$ANDROID_NDK_VERSION" > /dev/null
@@ -203,6 +208,11 @@ jobs:
 
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          # The action's default also installs the legacy "tools" package,
+          # which Google removed from the SDK repository (sdkmanager then
+          # fails with "Failed to find package 'tools'").
+          packages: 'platform-tools'
 
       - name: Install Android NDK
         run: echo "y" | sdkmanager "ndk;$ANDROID_NDK_VERSION" > /dev/null

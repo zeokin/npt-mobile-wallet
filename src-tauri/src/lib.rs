@@ -11,7 +11,10 @@ macro_rules! debug_log {
     };
 }
 
+#[cfg(target_os = "android")]
+mod android;
 mod keys;
+mod meta;
 mod rpc;
 mod seed;
 mod send;
@@ -19,7 +22,9 @@ mod session;
 mod sync;
 mod transaction;
 
+use std::path::Path;
 use std::path::PathBuf;
+use std::sync::atomic::AtomicU64;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
@@ -60,6 +65,19 @@ struct AppState {
     scan_lock: tokio::sync::Mutex<()>,
     /// Serializes updates of the persisted password-attempt state.
     limiter_lock: Mutex<()>,
+    /// Auto-lock timeout in seconds (user setting, persisted).
+    auto_lock_secs: AtomicU64,
+    /// A newly created wallet waiting for its backup quiz. It is written to
+    /// the device only once the quiz is passed.
+    pending_wallet: Mutex<Option<PendingWallet>>,
+    /// Serializes updates of the per-wallet address counters.
+    meta_lock: Mutex<()>,
+}
+
+/// A generated wallet that has not been saved yet.
+struct PendingWallet {
+    encrypted: Vec<u8>,
+    entropy: WalletEntropy,
 }
 
 #[derive(Serialize)]
@@ -83,10 +101,11 @@ fn app_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
 /// locked or the session timed out.
 fn active_session(state: &AppState) -> Result<(Arc<WalletEntropy>, Arc<KeyCache>), String> {
     let busy = state.work_in_progress.load(Ordering::SeqCst) > 0;
+    let timeout = state.auto_lock_secs.load(Ordering::SeqCst);
     let mut guard = state.session.lock().unwrap();
     match guard.as_ref() {
         None => Err("Wallet is locked".to_string()),
-        Some(s) if s.is_expired() && !busy => {
+        Some(s) if s.is_expired(timeout) && !busy => {
             *guard = None;
             Err("Session expired — please unlock again".to_string())
         }
@@ -195,7 +214,25 @@ fn reset_wallet_runtime(app: &tauri::AppHandle, state: &AppState) {
         let _ = std::fs::remove_file(dir.join("outgoing_history.json"));
         let _ = std::fs::remove_file(PasswordLimiter::file_path(&dir));
         sync::delete_scan_cache(&dir);
+        meta::WalletMeta::delete(&dir);
     }
+}
+
+/// Count address indices at which funds were found as handed out, so "New
+/// address" never repeats one and every used address keeps being scanned.
+fn absorb_found_indices(state: &AppState, dir: &Path, outcome: &sync::ScanOutcome) {
+    let _guard = state.meta_lock.lock().unwrap();
+    let mut meta = meta::WalletMeta::load(dir);
+    if meta.absorb_found(outcome.utxos.iter().map(|u| (u.key_type, u.key_index))) {
+        let _ = meta.save(dir);
+    }
+}
+
+/// The scan window for this wallet: every handed-out address plus look-ahead,
+/// widened by an optional window from the UI.
+fn scan_window_for(dir: &Path, hint: Option<sync::ScanWindow>) -> Option<sync::ScanWindow> {
+    let floor = meta::WalletMeta::load(dir).scan_floor();
+    Some(hint.map_or(floor, |w| w.max(floor)))
 }
 
 async fn encrypt_and_save(
@@ -218,10 +255,12 @@ fn wallet_exists(app: tauri::AppHandle) -> Result<bool, String> {
     Ok(seed::seed_exists(&path))
 }
 
-/// Create a new wallet and open a session for it (the user goes straight to
-/// the backup quiz and then the wallet, without unlocking again).
+/// Generate a new wallet and return its seed words. Nothing is saved yet: the
+/// wallet is written to the device only after the user has passed the backup
+/// quiz (`finish_new_wallet`), so a wallet can't exist without a backed-up
+/// seed phrase.
 #[tauri::command]
-async fn create_wallet(
+async fn prepare_new_wallet(
     app: tauri::AppHandle,
     pin: String,
     state: State<'_, AppState>,
@@ -236,11 +275,164 @@ async fn create_wallet(
     let words: Vec<String> = mnemonic.words().map(|w| w.to_string()).collect();
     let entropy = keys::wallet_entropy_from_phrase(&words)?;
 
-    encrypt_and_save(path, entropy_bytes, pin).await?;
+    let pin = Zeroizing::new(pin);
+    let encrypted = tokio::task::spawn_blocking(move || seed::encrypt_seed(&entropy_bytes, &pin))
+        .await
+        .map_err(|e| format!("Encryption task failed: {e}"))??;
+    *state.pending_wallet.lock().unwrap() = Some(PendingWallet { encrypted, entropy });
+    Ok(words)
+}
+
+/// Save the wallet prepared by `prepare_new_wallet` (after the backup quiz)
+/// and open a session for it.
+#[tauri::command]
+fn finish_new_wallet(app: tauri::AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+    let pending = state
+        .pending_wallet
+        .lock()
+        .unwrap()
+        .take()
+        .ok_or_else(|| "No new wallet is being created. Please start again.".to_string())?;
+    let path = seed::seed_file_path(&app)?;
+    if seed::seed_exists(&path) {
+        return Err("Wallet already exists".to_string());
+    }
+    seed::save_seed_file(&path, &pending.encrypted)?;
     // New wallet → wipe any leftover runtime state from a previous one.
     reset_wallet_runtime(&app, state.inner());
-    open_session(state.inner(), entropy);
-    Ok(words)
+    open_session(state.inner(), pending.entropy);
+    Ok(())
+}
+
+/// Forget a wallet that was generated but not confirmed.
+#[tauri::command]
+fn discard_new_wallet(state: State<'_, AppState>) {
+    *state.pending_wallet.lock().unwrap() = None;
+}
+
+/// Change the wallet password. The seed is re-encrypted and checked before it
+/// replaces the old file.
+#[tauri::command]
+async fn change_password(
+    app: tauri::AppHandle,
+    old_pin: String,
+    new_pin: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    active_session(state.inner())?;
+    validate_password(&new_pin)?;
+    if old_pin == new_pin {
+        return Err("The new password must be different from the current one".to_string());
+    }
+    let entropy = check_password(&app, state.inner(), &old_pin).await?;
+    let path = seed::seed_file_path(&app)?;
+    let new_pin = Zeroizing::new(new_pin);
+    let encrypted = tokio::task::spawn_blocking(move || -> Result<Vec<u8>, String> {
+        let encrypted = seed::encrypt_seed(&entropy, &new_pin)?;
+        let check = seed::decrypt_seed(&encrypted, &new_pin).map_err(String::from)?;
+        if check.as_slice() != entropy.as_slice() {
+            return Err("Password change self-check failed".to_string());
+        }
+        Ok(encrypted)
+    })
+    .await
+    .map_err(|e| format!("Password change failed: {e}"))??;
+    seed::save_seed_file(&path, &encrypted)?;
+    touch_session(state.inner());
+    Ok(())
+}
+
+/// Auto-lock timeout in seconds.
+#[tauri::command]
+fn get_auto_lock(state: State<'_, AppState>) -> u64 {
+    state.auto_lock_secs.load(Ordering::SeqCst)
+}
+
+#[tauri::command]
+fn set_auto_lock(
+    app: tauri::AppHandle,
+    seconds: u64,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    if !(session::MIN_AUTO_LOCK_SECS..=session::MAX_AUTO_LOCK_SECS).contains(&seconds) {
+        return Err(format!(
+            "Auto-lock must be between {} seconds and {} minutes",
+            session::MIN_AUTO_LOCK_SECS,
+            session::MAX_AUTO_LOCK_SECS / 60
+        ));
+    }
+    session::AppSettings {
+        auto_lock_secs: seconds,
+    }
+    .save(&app_dir(&app)?)?;
+    state.auto_lock_secs.store(seconds, Ordering::SeqCst);
+    touch_session(state.inner());
+    Ok(())
+}
+
+/// Result of checking seed words while they are typed.
+#[derive(Serialize)]
+struct SeedWordsCheck {
+    /// Positions (0-based) of words that are not in the BIP39 word list.
+    invalid: Vec<usize>,
+    /// All 18 words are filled in.
+    complete: bool,
+    /// Complete, every word known, and the checksum matches.
+    valid: bool,
+    error: Option<String>,
+}
+
+#[tauri::command]
+fn check_seed_words(words: Vec<String>) -> SeedWordsCheck {
+    let normalized: Vec<String> = words.iter().map(|w| w.trim().to_lowercase()).collect();
+    let invalid: Vec<usize> = normalized
+        .iter()
+        .enumerate()
+        .filter(|(_, w)| !w.is_empty() && bip39::Language::English.find_word(w).is_none())
+        .map(|(i, _)| i)
+        .collect();
+    let complete = normalized.len() == 18 && normalized.iter().all(|w| !w.is_empty());
+    if !complete || !invalid.is_empty() {
+        return SeedWordsCheck {
+            invalid,
+            complete,
+            valid: false,
+            error: None,
+        };
+    }
+    match seed::validate_mnemonic(&normalized.join(" ")) {
+        Ok(_) => SeedWordsCheck {
+            invalid,
+            complete,
+            valid: true,
+            error: None,
+        },
+        Err(_) => SeedWordsCheck {
+            invalid,
+            complete,
+            valid: false,
+            error: Some(
+                "These 18 words are not a valid seed phrase (the checksum does not match). \
+                 Check the spelling and the order."
+                    .to_string(),
+            ),
+        },
+    }
+}
+
+/// BIP39 words starting with `prefix` (for typing help), at most 6.
+#[tauri::command]
+fn suggest_seed_words(prefix: String) -> Vec<String> {
+    let prefix = prefix.trim().to_lowercase();
+    if prefix.is_empty() {
+        return vec![];
+    }
+    bip39::Language::English
+        .words_by_prefix(&prefix)
+        .iter()
+        .take(6)
+        .map(|w| w.to_string())
+        .collect()
 }
 
 #[tauri::command]
@@ -307,8 +499,9 @@ fn is_session_valid(state: State<'_, AppState>) -> bool {
 #[tauri::command]
 fn touch_activity(state: State<'_, AppState>) {
     let busy = state.work_in_progress.load(Ordering::SeqCst) > 0;
+    let timeout = state.auto_lock_secs.load(Ordering::SeqCst);
     let mut guard = state.session.lock().unwrap();
-    let expired = guard.as_ref().map(|s| s.is_expired() && !busy);
+    let expired = guard.as_ref().map(|s| s.is_expired(timeout) && !busy);
     match expired {
         Some(true) => *guard = None,
         Some(false) => {
@@ -418,6 +611,142 @@ async fn generate_main_addresses(
     .map_err(|e| format!("Address generation task failed: {e}"))?
 }
 
+// ── Receiving addresses ──────────────────────────────────────
+
+/// A receiving address and its derivation index.
+#[derive(Serialize, Clone)]
+struct AddressEntry {
+    index: u64,
+    address: String,
+}
+
+/// The address shown for receiving, per type (the newest handed out).
+#[derive(Serialize)]
+struct CurrentAddresses {
+    generation: AddressEntry,
+    ec_hybrid: AddressEntry,
+    viewing_address: AddressEntry,
+}
+
+/// Key types whose addresses can be shared for receiving.
+fn receiving_key_type(key_type: &str) -> Result<KeyType, String> {
+    let kt = keys::key_type_from_str(key_type)?;
+    if kt == KeyType::Symmetric {
+        return Err("Symmetric keys have no shareable address".to_string());
+    }
+    Ok(kt)
+}
+
+#[tauri::command]
+async fn current_addresses(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+) -> Result<CurrentAddresses, String> {
+    let (entropy, keys) = active_session(state.inner())?;
+    let net = *state.network.lock().unwrap();
+    let meta = meta::WalletMeta::load(&app_dir(&app)?);
+    tokio::task::spawn_blocking(move || -> Result<CurrentAddresses, String> {
+        let entry = |kt: KeyType| -> Result<AddressEntry, String> {
+            let index = meta.current_index(kt);
+            Ok(AddressEntry {
+                index,
+                address: keys::derive_receiving_address(&keys, &entropy, index, kt, net)?,
+            })
+        };
+        Ok(CurrentAddresses {
+            generation: entry(KeyType::Generation)?,
+            ec_hybrid: entry(KeyType::EcHybrid)?,
+            viewing_address: entry(KeyType::ViewingAddress)?,
+        })
+    })
+    .await
+    .map_err(|e| format!("Address task failed: {e}"))?
+}
+
+/// Every handed-out address of a type, newest first.
+#[tauri::command]
+async fn list_addresses(
+    app: tauri::AppHandle,
+    key_type: String,
+    state: State<'_, AppState>,
+) -> Result<Vec<AddressEntry>, String> {
+    let kt = receiving_key_type(&key_type)?;
+    let (entropy, keys) = active_session(state.inner())?;
+    let net = *state.network.lock().unwrap();
+    let count = meta::WalletMeta::load(&app_dir(&app)?).next_index(kt);
+    tokio::task::spawn_blocking(move || {
+        (0..count)
+            .rev()
+            .map(|index| {
+                Ok(AddressEntry {
+                    index,
+                    address: keys::derive_receiving_address(&keys, &entropy, index, kt, net)?,
+                })
+            })
+            .collect::<Result<Vec<_>, String>>()
+    })
+    .await
+    .map_err(|e| format!("Address task failed: {e}"))?
+}
+
+/// Hand out a fresh address of a type (e.g. one per payer, for privacy).
+#[tauri::command]
+async fn new_address(
+    app: tauri::AppHandle,
+    key_type: String,
+    state: State<'_, AppState>,
+) -> Result<AddressEntry, String> {
+    let kt = receiving_key_type(&key_type)?;
+    let (entropy, keys) = active_session(state.inner())?;
+    touch_session(state.inner());
+    let net = *state.network.lock().unwrap();
+    let dir = app_dir(&app)?;
+    let index = {
+        let _guard = state.meta_lock.lock().unwrap();
+        let mut meta = meta::WalletMeta::load(&dir);
+        let index = meta.issue(kt)?;
+        meta.save(&dir)?;
+        index
+    };
+    let address = tokio::task::spawn_blocking(move || {
+        keys::derive_receiving_address(&keys, &entropy, index, kt, net)
+    })
+    .await
+    .map_err(|e| format!("Address task failed: {e}"))??;
+    Ok(AddressEntry { index, address })
+}
+
+// ── Device helpers ───────────────────────────────────────────
+
+/// Block screenshots and the recent-apps preview while secrets are on screen
+/// (Android; no-op elsewhere).
+#[tauri::command]
+fn set_secure_screen(window: tauri::WebviewWindow, enabled: bool) -> Result<(), String> {
+    #[cfg(target_os = "android")]
+    {
+        android::set_secure(&window, enabled)
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        let _ = (window, enabled);
+        Ok(())
+    }
+}
+
+/// Text on the clipboard (the WebView cannot read the Android clipboard).
+#[tauri::command]
+async fn read_clipboard(window: tauri::WebviewWindow) -> Result<Option<String>, String> {
+    #[cfg(target_os = "android")]
+    {
+        android::read_clipboard(&window).await
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        let _ = window;
+        Err("Clipboard access is only available on the phone".to_string())
+    }
+}
+
 /// Validate a recipient address for the connected network.
 #[tauri::command]
 fn validate_address(address: String, state: State<'_, AppState>) -> keys::AddressValidation {
@@ -488,16 +817,31 @@ async fn send_transaction(
     let rpc = get_rpc(st)?;
     let network = *st.network.lock().unwrap();
 
+    let progress_app = app.clone();
+    let progress: send::ProgressFn = Arc::new(move |p| {
+        let _ = progress_app.emit("send_state", p);
+    });
+    progress(send::SendProgress {
+        stage: "preparing",
+        attempt: 1,
+        max_attempts: send::MAX_SEND_ATTEMPTS,
+        proof: None,
+        proof_index: 0,
+        proof_total: 0,
+    });
+
     // Authorize with the password (counts towards the attempt limit).
     let entropy_bytes = check_password(&app, st, &pin).await?;
     let entropy = entropy_from_seed_bytes(&entropy_bytes)?;
 
     // Fresh view of the wallet's coins (incremental: cheap after a sync).
     let dir = app_dir(&app)?;
+    let window = scan_window_for(&dir, scan_window);
     let scan = {
         let _scan_guard = st.scan_lock.lock().await;
-        sync::scan_for_utxos(&rpc, &entropy, &keys, network, scan_window, &dir).await?
+        sync::scan_for_utxos(&rpc, &entropy, &keys, network, window, &dir).await?
     };
+    absorb_found_indices(st, &dir, &scan);
 
     let request = send::SendRequest {
         recipient: recipient_address.clone(),
@@ -505,10 +849,6 @@ async fn send_transaction(
         fee,
         accept_lustrations: accept_lustrations.unwrap_or(false),
     };
-    let progress_app = app.clone();
-    let progress: send::ProgressFn = Arc::new(move |p| {
-        let _ = progress_app.emit("send_state", p);
-    });
     let outcome = send::send(
         &rpc,
         &entropy,
@@ -660,9 +1000,21 @@ async fn sync_wallet(
     let rpc = get_rpc(state.inner())?;
     let network = *state.network.lock().unwrap();
     let dir = app_dir(&app)?;
+    let window = scan_window_for(&dir, scan_window);
     let _scan_guard = state.scan_lock.lock().await;
-    let outcome = sync::scan_for_utxos(&rpc, &entropy, &keys, network, scan_window, &dir).await?;
+    let outcome = sync::scan_for_utxos(&rpc, &entropy, &keys, network, window, &dir).await?;
+    absorb_found_indices(state.inner(), &dir, &outcome);
     Ok(outcome.to_result(Timestamp::now()))
+}
+
+/// Forget the scan cache so the next sync downloads everything again.
+#[tauri::command]
+async fn rescan_wallet(app: tauri::AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+    active_session(state.inner())?;
+    let dir = app_dir(&app)?;
+    let _scan_guard = state.scan_lock.lock().await;
+    sync::delete_scan_cache(&dir);
+    Ok(())
 }
 
 // ── Supporter Connection Commands ────────────────────────────
@@ -685,6 +1037,18 @@ async fn connect_node(
     *state.network.lock().unwrap() = network;
     Ok(ConnectionInfo {
         network: network_name,
+        block_height,
+    })
+}
+
+/// Check a node without switching to it.
+#[tauri::command]
+async fn test_node(url: String) -> Result<ConnectionInfo, String> {
+    let client = RpcClient::new(&url)?;
+    let (network, block_height) = client.test_connection().await?;
+    keys::parse_network(&network)?;
+    Ok(ConnectionInfo {
+        network,
         block_height,
     })
 }
@@ -728,12 +1092,18 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_safe_area_insets_css::init())
-        .setup(|_app| {
+        .setup(|app| {
+            if let Ok(dir) = app.path().app_data_dir() {
+                let secs = session::AppSettings::load(&dir).auto_lock_secs;
+                app.state::<AppState>()
+                    .auto_lock_secs
+                    .store(secs, Ordering::SeqCst);
+            }
             // Native camera QR scanner — mobile only. On desktop the plugin is
             // not registered (the crate isn't even compiled there), so the
             // `scan` command errors and the Send screen falls back gracefully.
             #[cfg(mobile)]
-            _app.handle().plugin(tauri_plugin_barcode_scanner::init())?;
+            app.handle().plugin(tauri_plugin_barcode_scanner::init())?;
             Ok(())
         })
         .manage(AppState {
@@ -745,11 +1115,16 @@ pub fn run() {
             send_lock: tokio::sync::Mutex::new(()),
             scan_lock: tokio::sync::Mutex::new(()),
             limiter_lock: Mutex::new(()),
+            auto_lock_secs: AtomicU64::new(session::DEFAULT_AUTO_LOCK_SECS),
+            pending_wallet: Mutex::new(None),
+            meta_lock: Mutex::new(()),
         })
         .invoke_handler(tauri::generate_handler![
             // Wallet
             wallet_exists,
-            create_wallet,
+            prepare_new_wallet,
+            finish_new_wallet,
+            discard_new_wallet,
             import_wallet,
             unlock_wallet,
             lock_wallet,
@@ -757,12 +1132,24 @@ pub fn run() {
             touch_activity,
             export_seed_phrase,
             delete_wallet,
+            change_password,
+            get_auto_lock,
+            set_auto_lock,
+            check_seed_words,
+            suggest_seed_words,
             // Local key derivation
             generate_local_address,
             generate_main_addresses,
+            current_addresses,
+            list_addresses,
+            new_address,
             validate_address,
+            // Device
+            set_secure_screen,
+            read_clipboard,
             // UTXO scanning + sending
             sync_wallet,
+            rescan_wallet,
             send_transaction,
             check_transaction_mined,
             has_pending_tx,
@@ -772,6 +1159,7 @@ pub fn run() {
             load_outgoing_history,
             // Supporter
             connect_node,
+            test_node,
             disconnect_node,
             // Queries
             get_block_height,

@@ -322,6 +322,24 @@ mod tests {
         }
     }
 
+    /// The receive screen shows a QR code of `NPT:` + the uppercased address
+    /// (alphanumeric mode). A version-40 QR code at error correction level L
+    /// holds at most 4296 alphanumeric characters.
+    #[test]
+    fn every_address_type_fits_a_qr_code() {
+        let entropy = wallet_entropy_from_phrase(&test_phrase()).unwrap();
+        for kt in ["generation", "ec_hybrid", "viewing_address"] {
+            let addr = address(&entropy, 0, kt).unwrap();
+            let payload = format!("NPT:{}", addr.to_uppercase());
+            println!(
+                "{kt}: address {} chars, QR payload {}",
+                addr.len(),
+                payload.len()
+            );
+            assert!(payload.len() <= 4296, "{kt} QR payload too long");
+        }
+    }
+
     #[test]
     fn symmetric_keys_are_never_exported_as_addresses() {
         let entropy = wallet_entropy_from_phrase(&test_phrase()).unwrap();

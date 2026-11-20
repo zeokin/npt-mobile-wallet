@@ -684,6 +684,7 @@ mod tests {
             receiver_preimage: Digest::default(),
             aocl_leaf_index: aocl,
             block_height: aocl,
+            block_time: None,
             key_type: KeyType::Generation,
             key_index: 0,
             spent,

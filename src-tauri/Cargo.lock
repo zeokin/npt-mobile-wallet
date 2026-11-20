@@ -3342,6 +3342,7 @@ dependencies = [
  "bip39",
  "futures",
  "itertools",
+ "jni",
  "libc",
  "neptune-consensus",
  "neptune-mempool",
