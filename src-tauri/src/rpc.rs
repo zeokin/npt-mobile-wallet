@@ -2,11 +2,13 @@
 //!
 //! We implement neptune-rpc-api's [`Transport`] trait. Because neptune-rpc-api
 //! provides a blanket `impl<T: Transport> RpcApi for T`, implementing
-//! `Transport` gives us every typed RPC method (`tip`, `height`, `network`,
-//! `get_blocks`, `was_mined`, `restore_membership_proof`,
+//! `Transport` gives us every typed RPC method (`tip_header`, `height`,
+//! `network`, `get_blocks`, `was_mined`, `restore_membership_proof`,
 //! `submit_transaction`, `block_heights_by_flags`,
-//! `block_heights_by_absolute_index_sets`, ...) for free — no hand-rolled
-//! request/response parsing required.
+//! `batch_are_bloom_indices_set`, ...) for free — no hand-rolled
+//! request/response parsing required. Server-side errors that carry a typed
+//! payload (e.g. `SubmitTransactionError::NotConfirmable`) are decoded into
+//! [`neptune_rpc_api::api::rpc::RpcError`] by that blanket impl.
 //!
 //! Equivalent to the official `neptune-rpc-client` crate, but built on
 //! reqwest with `rustls-tls` so we don't pull OpenSSL into Android builds.
@@ -26,6 +28,18 @@ use neptune_rpc_api::model::json::JsonResult;
 use reqwest::Client;
 use serde_json::Value;
 
+/// Time allowed to establish the TCP/TLS connection. A supporter that does not
+/// answer within this window is treated as offline instead of leaving the UI
+/// on "Connecting…" for minutes.
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// Default per-request timeout for small calls (height, flags, headers, …).
+const DEFAULT_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// Per-request timeout for calls that move a lot of data or make the node do
+/// a lot of work (block downloads, membership proofs, transaction upload).
+const LONG_TIMEOUT: Duration = Duration::from_secs(300);
+
 #[derive(Clone)]
 pub(crate) struct RpcClient {
     url: String,
@@ -34,16 +48,25 @@ pub(crate) struct RpcClient {
 }
 
 impl RpcClient {
-    pub(crate) fn new(url: &str, _auth_token: Option<String>) -> Self {
+    pub(crate) fn new(url: &str) -> Result<Self, String> {
+        let url = url.trim().trim_end_matches('/').to_string();
+        if !(url.starts_with("https://") || url.starts_with("http://")) {
+            return Err("Node URL must start with https:// or http://".to_string());
+        }
         let client = Client::builder()
-            .timeout(Duration::from_secs(300))
+            .connect_timeout(CONNECT_TIMEOUT)
+            .timeout(LONG_TIMEOUT)
             .build()
-            .expect("Failed to create HTTP client");
-        Self {
-            url: url.to_string(),
+            .map_err(|e| format!("Failed to create HTTP client: {e}"))?;
+        Ok(Self {
+            url,
             client,
             id_counter: Arc::new(AtomicU64::new(0)),
-        }
+        })
+    }
+
+    pub(crate) fn url(&self) -> &str {
+        &self.url
     }
 
     /// Ping the node: returns (network, tip height). Any RPC error is
@@ -52,9 +75,23 @@ impl RpcClient {
         let network = self
             .network()
             .await
-            .map_err(|e| format!("network: {}", e))?;
-        let height = self.height().await.map_err(|e| format!("height: {}", e))?;
+            .map_err(|e| format!("Cannot reach node: {}", e))?;
+        let height = self
+            .height()
+            .await
+            .map_err(|e| format!("Cannot reach node: {}", e))?;
         Ok((network.network, u64::from(height.height)))
+    }
+
+    fn timeout_for(method: &str) -> Duration {
+        match method {
+            "wallet_submitTransaction"
+            | "wallet_restoreMembershipProof"
+            | "wallet_getBlocks"
+            | "archival_getBlock"
+            | "archival_getBlockTransactionKernel" => LONG_TIMEOUT,
+            _ => DEFAULT_TIMEOUT,
+        }
     }
 }
 
@@ -71,16 +108,30 @@ impl Transport for RpcClient {
         let resp = self
             .client
             .post(&self.url)
+            .timeout(Self::timeout_for(method))
             .json(&req)
             .send()
             .await
             .map_err(|e| JsonError::ConnectionFailed {
-                message: e.to_string(),
+                message: if e.is_timeout() {
+                    "the node did not answer in time".to_string()
+                } else if e.is_connect() {
+                    "could not connect to the node".to_string()
+                } else {
+                    e.to_string()
+                },
             })?;
 
         if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            let snippet: String = body.chars().take(160).collect();
             return Err(JsonError::HttpError {
-                message: resp.status().to_string(),
+                message: if snippet.is_empty() {
+                    status.to_string()
+                } else {
+                    format!("{status}: {snippet}")
+                },
             });
         }
 

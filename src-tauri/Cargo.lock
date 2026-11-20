@@ -41,6 +41,7 @@ dependencies = [
  "ctr",
  "ghash",
  "subtle",
+ "zeroize",
 ]
 
 [[package]]
@@ -409,9 +410,9 @@ checksum = "d86b93f97252c47b41663388e6d155714a9d0c398b99f1005cbc5f978b29f445"
 
 [[package]]
 name = "bfieldcodec_derive"
-version = "0.7.0"
+version = "0.7.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4265eba9f15a272bf097026963df8badd58ea1b12b9fe4c01666bffef5aa6a9b"
+checksum = "31eeed2785c999e20b91158a336954133e24d7b90d6881f094b7662d27159cfe"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -436,6 +437,7 @@ dependencies = [
  "bitcoin_hashes",
  "serde",
  "unicode-normalization",
+ "zeroize",
 ]
 
 [[package]]
@@ -584,6 +586,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "bytesize"
+version = "1.3.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2e93abca9e28e0a1b9877922aacb20576e05d4679ffa78c3d6dc22a26a216659"
+
+[[package]]
 name = "cairo-rs"
 version = "0.18.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -698,6 +706,17 @@ name = "cfg_aliases"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "613afe47fcd5fac7ccf1db93babcb082c5994d996f20b8b159f2ad1658eb5724"
+
+[[package]]
+name = "chacha20"
+version = "0.10.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "65c35e4b699c7e15ccbe7ee35c005e4fc0a278d22238a2857e6ce2dadeda1b06"
+dependencies = [
+ "cfg-if",
+ "cpufeatures 0.3.1",
+ "rand_core 0.10.1",
+]
 
 [[package]]
 name = "chrono"
@@ -1897,9 +1916,9 @@ dependencies = [
 
 [[package]]
 name = "get-size-derive2"
-version = "0.7.4"
+version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f2b6d1e2f75c16bfbcd0f95d84f99858a6e2f885c2287d1f5c3a96e8444a34b4"
+checksum = "c9f8ab1b98a1284961d722ce994d9a0f3018ab1917618d4113824a72b9f71bc9"
 dependencies = [
  "attribute-derive",
  "quote",
@@ -1908,9 +1927,9 @@ dependencies = [
 
 [[package]]
 name = "get-size2"
-version = "0.7.4"
+version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "49cf31a6d70300cf81461098f7797571362387ef4bf85d32ac47eaa59b3a5a1a"
+checksum = "b0cd0777a1057362cab35a779e0d79dacecb8d73e2c733eaafeb7ea917b08f03"
 dependencies = [
  "get-size-derive2",
 ]
@@ -1960,10 +1979,13 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0de51e6874e94e7bf76d726fc5d13ba782deca734ff60d5bb2fb2607c7406555"
 dependencies = [
  "cfg-if",
+ "js-sys",
  "libc",
  "r-efi 6.0.0",
+ "rand_core 0.10.1",
  "wasip2",
  "wasip3",
+ "wasm-bindgen",
 ]
 
 [[package]]
@@ -2710,6 +2732,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "keccak"
+version = "0.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d8f198d1db720e4940b5a493201d199d9f24f568f8f746bd13706243a2f71598"
+dependencies = [
+ "cfg-if",
+ "cpufeatures 0.3.1",
+]
+
+[[package]]
 name = "keyboard-types"
 version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3097,16 +3129,15 @@ dependencies = [
 
 [[package]]
 name = "neptune-consensus"
-version = "0.17.1"
+version = "0.20.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "22aba3d02bf64280bfe20ecd050b89842969ff1a44c71d152c515ff8f1c94c33"
+checksum = "a6afe8071abe7da35fc9e7ce7ed7a941d9613da1df5e98c10732755511be2cec"
 dependencies = [
  "anyhow",
  "async-trait",
  "bincode",
  "clap",
  "field_count",
- "futures",
  "get-size2",
  "itertools",
  "neptune-job-queue",
@@ -3115,7 +3146,7 @@ dependencies = [
  "num-bigint",
  "num-rational",
  "num-traits",
- "rand 0.9.2",
+ "rand 0.10.4",
  "rayon",
  "readonly",
  "regex",
@@ -3123,8 +3154,7 @@ dependencies = [
  "serde_arrays",
  "serde_json",
  "strum",
- "tasm-lib 7.0.0",
- "tasm-lib 8.0.0",
+ "tasm-lib",
  "thiserror 1.0.69",
  "tokio",
  "tracing",
@@ -3132,12 +3162,12 @@ dependencies = [
 
 [[package]]
 name = "neptune-job-queue"
-version = "0.17.1"
+version = "0.20.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a51156005d975048681f870b025ee7704c89dbdf941c94de66063c5e5a3ba9e5"
+checksum = "014490c3e441a35d156654637e7e5418002d79d4ea5a31b86ae20a28e1a14d46"
 dependencies = [
  "async-trait",
- "rand 0.9.2",
+ "rand 0.10.4",
  "strum",
  "thiserror 1.0.69",
  "tokio",
@@ -3145,25 +3175,48 @@ dependencies = [
 ]
 
 [[package]]
-name = "neptune-mutator-set"
-version = "0.17.1"
+name = "neptune-mempool"
+version = "0.20.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c1cf19a6ee2338a16a44b149f9ae495919824b9c55c75ce7763acc10fc796bf0"
+checksum = "486b48d7976e5a23a5549b9e12a9ab2bf870fa366f5364c2f7128a1d0a50a965"
+dependencies = [
+ "anyhow",
+ "bytesize",
+ "get-size2",
+ "itertools",
+ "neptune-consensus",
+ "neptune-mutator-set",
+ "neptune-primitives",
+ "neptune-rpc-api",
+ "num-rational",
+ "num-traits",
+ "priority-queue",
+ "serde",
+ "strum",
+ "tasm-lib",
+ "tracing",
+]
+
+[[package]]
+name = "neptune-mutator-set"
+version = "0.20.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "25c2de6b977d29b5cc904a8e39c50bdec86123ab8bbac64cc7f2dfb7889523a3"
 dependencies = [
  "get-size2",
  "itertools",
  "num-traits",
  "serde",
  "serde_arrays",
- "tasm-lib 8.0.0",
+ "tasm-lib",
  "thiserror 1.0.69",
 ]
 
 [[package]]
 name = "neptune-primitives"
-version = "0.17.1"
+version = "0.20.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "756e58073e447ab9eba35118d303e795ed007b5f4438d381328d9eceda58775e"
+checksum = "a0bf1340da44ff26624bb2c1ac6aba9cac722b5e838b156f93b9f3dcb8dab300"
 dependencies = [
  "anyhow",
  "chrono",
@@ -3172,19 +3225,19 @@ dependencies = [
  "itertools",
  "num-bigint",
  "num-traits",
- "rand 0.9.2",
+ "rand 0.10.4",
  "serde",
  "strum",
- "tasm-lib 8.0.0",
+ "tasm-lib",
  "thiserror 1.0.69",
  "tokio",
 ]
 
 [[package]]
 name = "neptune-rpc-api"
-version = "0.17.1"
+version = "0.20.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "896707c26549640f3c8f82df62351977bd00e24172d1f4fb81113dace997c3ab"
+checksum = "67bba8f6dca3a14660036e9f50c92e94c2c1488568c8f7bab298ce70526c8b7b"
 dependencies = [
  "async-trait",
  "hex",
@@ -3200,15 +3253,15 @@ dependencies = [
  "serde_json",
  "serde_tuple",
  "strum",
- "tasm-lib 8.0.0",
+ "tasm-lib",
  "thiserror 1.0.69",
 ]
 
 [[package]]
 name = "neptune-rpc-macros"
-version = "0.17.1"
+version = "0.20.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ed0bea35c3f373043769b9b1c376d1c78b02a006db89480f65e061b0fd7c7e82"
+checksum = "b167b0d408a784e3474e286d2520075f416977e4f1fcd84d4fa1350c14a58d09"
 dependencies = [
  "convert_case 0.9.0",
  "quote",
@@ -3217,9 +3270,9 @@ dependencies = [
 
 [[package]]
 name = "neptune-wallet"
-version = "0.17.1"
+version = "0.20.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "af1a118051f1b7866d191b6358a5234faf406a9ca729625b79d97f979e21a918"
+checksum = "471eb8b33e7e258a0d416f7dcdc1ee6de028caf6bb8a508ac26e879f56c0aac3"
 dependencies = [
  "aead",
  "aes-gcm",
@@ -3234,13 +3287,13 @@ dependencies = [
  "neptune-mutator-set",
  "neptune-primitives",
  "num-traits",
- "rand 0.9.2",
+ "rand 0.10.4",
  "regex",
  "serde",
  "serde_json",
- "sha3",
+ "sha3 0.10.8",
  "strum",
- "tasm-lib 8.0.0",
+ "tasm-lib",
  "thiserror 1.0.69",
  "tiny-bip39",
  "tracing",
@@ -3279,7 +3332,7 @@ dependencies = [
 
 [[package]]
 name = "npt-mobile-wallet"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "aes-gcm",
  "anyhow",
@@ -3287,9 +3340,11 @@ dependencies = [
  "async-trait",
  "bincode",
  "bip39",
- "hex",
+ "futures",
  "itertools",
+ "libc",
  "neptune-consensus",
+ "neptune-mempool",
  "neptune-mutator-set",
  "neptune-primitives",
  "neptune-rpc-api",
@@ -4072,6 +4127,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "priority-queue"
+version = "1.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a0bda9164fe05bc9225752d54aae413343c36f684380005398a6a8fde95fe785"
+dependencies = [
+ "autocfg",
+ "indexmap 1.9.3",
+]
+
+[[package]]
 name = "proc-macro-crate"
 version = "1.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4293,6 +4358,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "rand"
+version = "0.10.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8f6fa277c67e6ea590466f04c3fe82cb509f0864fe470643e5570de9514a9b11"
+dependencies = [
+ "chacha20",
+ "getrandom 0.4.2",
+ "rand_core 0.10.1",
+]
+
+[[package]]
 name = "rand_chacha"
 version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4348,6 +4424,12 @@ checksum = "76afc826de14238e6e8c374ddcc1fa19e374fd8dd986b0d2af0d02377261d83c"
 dependencies = [
  "getrandom 0.3.4",
 ]
+
+[[package]]
+name = "rand_core"
+version = "0.10.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "63b8176103e19a2643978565ca18b50549f6101881c443590420e4dc998a3c69"
 
 [[package]]
 name = "rand_hc"
@@ -5052,7 +5134,29 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "75872d278a8f37ef87fa0ddbda7802605cb18344497949862c0d4dcb291eba60"
 dependencies = [
  "digest 0.10.7",
- "keccak",
+ "keccak 0.1.6",
+]
+
+[[package]]
+name = "sha3"
+version = "0.12.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bc9bad02c26382724b2d2692c6f179285e4b54eeecd7968f52a50059c3c11759"
+dependencies = [
+ "digest 0.11.3",
+ "keccak 0.2.2",
+ "sponge-cursor",
+]
+
+[[package]]
+name = "shake"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "09057cb2149ad4cbd2da1e26b351f9a4c354219421229c69c3063e6f61947c4a"
+dependencies = [
+ "digest 0.11.3",
+ "keccak 0.2.2",
+ "sponge-cursor",
 ]
 
 [[package]]
@@ -5178,6 +5282,12 @@ dependencies = [
  "base64ct",
  "der",
 ]
+
+[[package]]
+name = "sponge-cursor"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3a0219bd7d979d58245a4f41f695e1ac9f8befdffadd7f61f1bae9e39abc6620"
 
 [[package]]
 name = "stable_deref_trait"
@@ -5409,9 +5519,9 @@ checksum = "61c41af27dd6d1e27b1b16b489db798443478cef1f06a660c96db617ba5de3b1"
 
 [[package]]
 name = "tasm-lib"
-version = "7.0.0"
+version = "9.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "db7abc899995c0d6b41d82180e1e6cce607916b1677857326c37a28514dcfb87"
+checksum = "aa2d007356c2d5fc995baa3f3c46179086cc68b9f3dc4c5ab19b6542148a54bb"
 dependencies = [
  "anyhow",
  "arbitrary",
@@ -5421,54 +5531,20 @@ dependencies = [
  "ndarray",
  "num",
  "num-traits",
- "rand 0.9.2",
+ "rand 0.10.4",
  "serde",
  "serde_json",
  "strum",
- "tasm-object-derive 7.0.0",
- "triton-vm 7.0.0",
- "web-time",
-]
-
-[[package]]
-name = "tasm-lib"
-version = "8.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "220f9142761ca19d366f15e6d874bcfee1626fb5ee384d0ebba5ac725155a7a3"
-dependencies = [
- "anyhow",
- "arbitrary",
- "const_format",
- "hex",
- "itertools",
- "ndarray",
- "num",
- "num-traits",
- "rand 0.9.2",
- "serde",
- "serde_json",
- "strum",
- "tasm-object-derive 8.0.0",
- "triton-vm 8.0.0",
+ "tasm-object-derive",
+ "triton-vm",
  "web-time",
 ]
 
 [[package]]
 name = "tasm-object-derive"
-version = "7.0.0"
+version = "9.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2dd2733bd907d9dcd39df837cfe4feba2ef10aeba6547e8688e6b35efafdd3d7"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.117",
-]
-
-[[package]]
-name = "tasm-object-derive"
-version = "8.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "506979c4d62ca1ffc14bf8b632817d39f1a1f269fba053be84dcca917d0ea69b"
+checksum = "b1da4dd24977ea1f412c65676175a43f2f8301202351fcc44f2e865c552a4b6f"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -6160,37 +6236,23 @@ dependencies = [
 
 [[package]]
 name = "triton-air"
-version = "7.0.0"
+version = "9.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "05100018626561a14bdfee44f9e47c767bbec7c645f4707ac5a3541ec648d49f"
+checksum = "5e11957cc2567356d80702c9a6461bbc934cde12f28ab9abe44dbef6fb415c8f"
 dependencies = [
  "arbitrary",
  "itertools",
  "strum",
- "triton-constraint-circuit 7.0.0",
- "triton-isa 7.0.0",
- "twenty-first",
-]
-
-[[package]]
-name = "triton-air"
-version = "8.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "886622ddb82850963941f45c815530d5e24ee860b8eeacc5082308a74e087d75"
-dependencies = [
- "arbitrary",
- "itertools",
- "strum",
- "triton-constraint-circuit 8.0.0",
- "triton-isa 8.0.0",
+ "triton-constraint-circuit",
+ "triton-isa",
  "twenty-first",
 ]
 
 [[package]]
 name = "triton-constraint-builder"
-version = "7.0.0"
+version = "9.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ceb01697a5d694084a6cb889cd543b86c6f7d8bf972f0f7ccac249a4aae63390"
+checksum = "b5a2e4d1536f4f019758aac131cd7ef2a631c8f77459a5d06daa577ea41aab22"
 dependencies = [
  "itertools",
  "prettyplease",
@@ -6198,50 +6260,17 @@ dependencies = [
  "quote",
  "strum",
  "syn 2.0.117",
- "triton-air 7.0.0",
- "triton-constraint-circuit 7.0.0",
- "triton-isa 7.0.0",
- "twenty-first",
-]
-
-[[package]]
-name = "triton-constraint-builder"
-version = "8.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "305dc135e3aee35187100041e8e3e78b7067d47520cc3a7c09ec503f76d7eac9"
-dependencies = [
- "itertools",
- "prettyplease",
- "proc-macro2",
- "quote",
- "strum",
- "syn 2.0.117",
- "triton-air 8.0.0",
- "triton-constraint-circuit 8.0.0",
- "triton-isa 8.0.0",
+ "triton-air",
+ "triton-constraint-circuit",
+ "triton-isa",
  "twenty-first",
 ]
 
 [[package]]
 name = "triton-constraint-circuit"
-version = "7.0.0"
+version = "9.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "961bfa562c091b39f65b8fa0c27890db36ed8968ff9cf1c842db548c76941536"
-dependencies = [
- "arbitrary",
- "itertools",
- "ndarray",
- "num-traits",
- "proc-macro2",
- "quote",
- "twenty-first",
-]
-
-[[package]]
-name = "triton-constraint-circuit"
-version = "8.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "eca867abb4f21b02528535a341c0050df9a158b4d2766c95c063f5fe4ef7988d"
+checksum = "42704802a387e46aa2d39bf869df8fa4678d8c2a9f6484b22b104b0812e87bbf"
 dependencies = [
  "arbitrary",
  "itertools",
@@ -6254,28 +6283,9 @@ dependencies = [
 
 [[package]]
 name = "triton-isa"
-version = "7.0.0"
+version = "9.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ee155aabdd118aa503e9bfe46e67c67a46d3c06b57b3ff94fa5a6ebf149e2371"
-dependencies = [
- "arbitrary",
- "get-size2",
- "itertools",
- "lazy_static",
- "nom",
- "nom-language",
- "num-traits",
- "serde",
- "strum",
- "thiserror 2.0.18",
- "twenty-first",
-]
-
-[[package]]
-name = "triton-isa"
-version = "8.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f615af2a98eabdaac7cc95f7330fc2105f6380ac8fc34cf5b7c1e9edb122dbd9"
+checksum = "88cef36712c962891c52bbe5f78793daefccb2f616374fee6d85a03ff5b136cf"
 dependencies = [
  "arbitrary",
  "get-size2",
@@ -6292,9 +6302,9 @@ dependencies = [
 
 [[package]]
 name = "triton-vm"
-version = "7.0.0"
+version = "9.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5b7f98e447c631135092a38c29a5ba286e77540759560287f6798e2e840a3c79"
+checksum = "6a74420b62092a7aa1a021ec2fcce6456f723165d6d77c009fb4afc5005491bd"
 dependencies = [
  "arbitrary",
  "colored",
@@ -6307,48 +6317,16 @@ dependencies = [
  "num-traits",
  "prettyplease",
  "proc-macro2",
- "rand 0.9.2",
+ "rand 0.10.4",
  "rayon",
  "serde",
  "strum",
  "syn 2.0.117",
  "thiserror 2.0.18",
- "triton-air 7.0.0",
- "triton-constraint-builder 7.0.0",
- "triton-constraint-circuit 7.0.0",
- "triton-isa 7.0.0",
- "twenty-first",
- "unicode-width",
- "web-time",
-]
-
-[[package]]
-name = "triton-vm"
-version = "8.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0ffb3ccf17d8feee26164a027aaf5d318aeee655592dc744bfdda0863a207d39"
-dependencies = [
- "arbitrary",
- "colored",
- "get-size2",
- "indexmap 2.13.0",
- "itertools",
- "lazy_static",
- "memory-stats",
- "ndarray",
- "num-traits",
- "prettyplease",
- "proc-macro2",
- "rand 0.9.2",
- "rayon",
- "serde",
- "strum",
- "syn 2.0.117",
- "thiserror 2.0.18",
- "triton-air 8.0.0",
- "triton-constraint-builder 8.0.0",
- "triton-constraint-circuit 8.0.0",
- "triton-isa 8.0.0",
+ "triton-air",
+ "triton-constraint-builder",
+ "triton-constraint-circuit",
+ "triton-isa",
  "twenty-first",
  "unicode-width",
  "web-time",
@@ -6362,26 +6340,28 @@ checksum = "e421abadd41a4225275504ea4d6566923418b7f05506fbc9c0fe86ba7396114b"
 
 [[package]]
 name = "twenty-first"
-version = "1.1.0"
+version = "3.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2f2127e955aea73cc584e429c544f4a5997128fd5e4021c852cb63f309bf51ea"
+checksum = "33fbf487eb00d31e5c957491d92a6ef06a8920c44b8a8c40950b67f38d2c3314"
 dependencies = [
  "arbitrary",
  "bfieldcodec_derive",
  "get-size2",
- "getrandom 0.3.4",
+ "getrandom 0.4.2",
  "hex",
  "itertools",
+ "libc",
  "num-bigint",
  "num-traits",
  "phf 0.13.1",
- "rand 0.9.2",
+ "rand 0.10.4",
  "rayon",
  "serde",
  "serde-big-array",
  "serde_derive",
  "serde_json",
- "sha3",
+ "sha3 0.12.0",
+ "shake",
  "thiserror 2.0.18",
  "wasm-bindgen",
  "zeroize",

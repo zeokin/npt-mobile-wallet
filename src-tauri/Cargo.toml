@@ -1,6 +1,6 @@
 [package]
 name = "npt-mobile-wallet"
-version = "0.2.1"
+version = "0.3.0"
 description = "Neptune Cash Wallet"
 authors = ["you"]
 edition = "2021"
@@ -20,6 +20,8 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 tokio = { version = "1", features = ["full"] }
+# Bounded-concurrency request streams (`buffer_unordered`) for the sync.
+futures = "0.3"
 anyhow = "1"
 itertools = "0.14"
 num-traits = "0.2"
@@ -29,21 +31,33 @@ async-trait = "0.1"
 rayon = "1"
 
 # Neptune-core types for key derivation and transaction building.
-neptune-primitives = "0.17.1"
-neptune-consensus = "0.17.1"
-neptune-wallet = "0.17.1"
-neptune-mutator-set = "0.17.1"
-neptune-rpc-api = "0.17.1"
+# 0.20.x is the current neptune-core release line: it knows softfork epsilon
+# (main net block 62,500), proves with Triton VM 9 and no longer links the
+# legacy Triton VM 7 prover. The wallet-facing API is unchanged from 0.17.1
+# apart from the removed legacy prover.
+neptune-primitives = "0.20.1"
+neptune-consensus = "0.20.1"
+neptune-wallet = "0.20.1"
+neptune-mutator-set = "0.20.1"
+neptune-rpc-api = "0.20.1"
+# Only for `Txid` (the transaction id shown to the user / kept for pending
+# transactions). Depends on nothing beyond the crates above.
+neptune-mempool = "0.20.1"
 
 # Seed management
-bip39 = "2.1"
-aes-gcm = "0.10"
+bip39 = { version = "2.1", features = ["zeroize"] }
+aes-gcm = { version = "0.10", features = ["zeroize"] }
 rand = "0.8"
-hex = "0.4"
 sha2 = "0.10"
 argon2 = "0.5"
 zeroize = { version = "1", features = ["derive"] }
+# Compact on-disk encoding of the public block-scan cache.
 bincode = "1"
+
+# CLOCK_BOOTTIME for the auto-lock timer (keeps counting while the device
+# sleeps, unlike `Instant`).
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
 
 # Mobile-only: native camera QR/barcode scanning (used on the Send screen to
 # fill a recipient address). Not available on desktop — the scan command is

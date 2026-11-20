@@ -14,77 +14,52 @@ macro_rules! debug_log {
 mod keys;
 mod rpc;
 mod seed;
+mod send;
+mod session;
 mod sync;
 mod transaction;
 
+use std::path::PathBuf;
+use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::Ordering;
+use std::sync::Arc;
 use std::sync::Mutex;
-use std::time::Instant;
 
-use neptune_consensus::block::block_header::BlockPow;
-use neptune_consensus::consensus_rule_set::ConsensusRuleSet;
-use neptune_consensus::transaction::announcement::Announcement;
-use neptune_consensus::transaction::transparent_input::TransparentInput;
-use neptune_consensus::transaction::utxo::Utxo;
-use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
-use neptune_mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
-use neptune_mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
-use neptune_primitives::block_height::BlockHeight;
+use keys::KeyCache;
 use neptune_primitives::network::Network;
-use neptune_primitives::tasm_lib::prelude::Digest;
-use neptune_primitives::tasm_lib::prelude::Tip5;
 use neptune_primitives::timestamp::Timestamp;
-use neptune_primitives::twenty_first::util_types::mmr::mmr_trait::Mmr;
 use neptune_rpc_api::api::rpc::RpcApi;
 use neptune_rpc_api::model::block::transaction_kernel::RpcAdditionRecord;
-use neptune_rpc_api::model::wallet::transaction::RpcTransaction;
-use neptune_wallet::address::ReceivingAddress;
-use neptune_wallet::address::SpendingKey;
-use neptune_wallet::transaction_details::TransactionDetails;
-use neptune_wallet::transaction_output::TxOutput;
-use neptune_wallet::transaction_output::TxOutputList;
-use neptune_wallet::unlocked_utxo::UnlockedUtxo;
+use neptune_wallet::address::KeyType;
 use neptune_wallet::wallet_entropy::WalletEntropy;
-use num_traits::CheckedAdd;
-use num_traits::CheckedSub;
-use num_traits::Zero;
 use rpc::RpcClient;
 use serde::Serialize;
+use session::PasswordLimiter;
+use session::Session;
+use tauri::Emitter;
 use tauri::Manager;
 use tauri::State;
-use zeroize::Zeroize;
-
-use crate::seed::is_v2_format;
-
-/// Session auto-lock after 3 minutes of inactivity.
-const SESSION_TIMEOUT_SECS: u64 = 180;
-
-/// Max failed PIN attempts before cooldown.
-const MAX_PIN_ATTEMPTS: u32 = 5;
-
-/// Cooldown duration after max failed attempts (60 seconds).
-const PIN_COOLDOWN_SECS: u64 = 60;
+use zeroize::Zeroizing;
 
 struct AppState {
     rpc: Mutex<Option<RpcClient>>,
-    wallet_unlocked: Mutex<bool>,
-    /// PIN cached after unlock — used for sync/send/address without re-entering.
-    /// Cleared on lock.
-    cached_pin: Mutex<Option<String>>,
-    /// Tracks when the last user activity occurred (for session timeout).
-    last_activity: Mutex<Option<Instant>>,
-    /// Tracks consecutive failed PIN attempts.
-    failed_pin_attempts: Mutex<u32>,
-    /// When the last lockout started (if any).
-    lockout_until: Mutex<Option<Instant>>,
+    /// Network of the connected supporter (main net until connected).
+    network: Mutex<Network>,
+    /// The unlocked wallet, if any.
+    session: Mutex<Option<Session>>,
     /// True while a submitted transaction is waiting to be mined.
     /// Blocks additional sends to prevent double-spending.
     has_pending_tx: Mutex<bool>,
-    /// True while a long-running authenticated operation is in progress
-    /// (currently: send_transaction, whose proof generation can take several
-    /// minutes). While set, `check_session` skips the idle-timeout check so
-    /// the UI isn't kicked to the unlock screen mid-send. The flag is always
-    /// cleared on return from the operation.
-    work_in_progress: Mutex<bool>,
+    /// Long-running authenticated operations in progress (sending: proving
+    /// can take minutes). While non-zero the idle timeout does not lock the
+    /// wallet mid-operation.
+    work_in_progress: AtomicUsize,
+    /// Held for a whole send, so two sends never run (and prove) at once.
+    send_lock: tokio::sync::Mutex<()>,
+    /// Serializes scans; a second scan waits and then runs incrementally.
+    scan_lock: tokio::sync::Mutex<()>,
+    /// Serializes updates of the persisted password-attempt state.
+    limiter_lock: Mutex<()>,
 }
 
 #[derive(Serialize)]
@@ -93,85 +68,113 @@ struct ConnectionInfo {
     block_height: u64,
 }
 
-/// Touch the session timer (call on any authenticated action).
-fn touch_session(state: &State<'_, AppState>) {
-    *state.last_activity.lock().unwrap() = Some(Instant::now());
+fn app_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("App data dir: {}", e))?;
+    std::fs::create_dir_all(&dir).map_err(|e| format!("Create dir: {}", e))?;
+    Ok(dir)
 }
 
-/// Check if the session has expired. Returns true if still valid.
-fn check_session(state: &State<'_, AppState>) -> Result<(), String> {
-    let unlocked = *state.wallet_unlocked.lock().unwrap();
-    if !unlocked {
-        return Err("Wallet is locked".to_string());
-    }
-    // A long-running authenticated operation (e.g. STARK proof generation in
-    // send_transaction) may run for several minutes without user interaction.
-    // Treat the session as valid during that window so the UI isn't kicked
-    // to the unlock screen mid-send.
-    if *state.work_in_progress.lock().unwrap() {
-        return Ok(());
-    }
-    if let Some(last) = *state.last_activity.lock().unwrap() {
-        if last.elapsed().as_secs() > SESSION_TIMEOUT_SECS {
-            *state.wallet_unlocked.lock().unwrap() = false;
-            set_cached_pin(state, None);
-            return Err("Session expired — please unlock again".to_string());
+// ── Session helpers ──────────────────────────────────────────
+
+/// The unlocked wallet's entropy and key cache, or an error if the wallet is
+/// locked or the session timed out.
+fn active_session(state: &AppState) -> Result<(Arc<WalletEntropy>, Arc<KeyCache>), String> {
+    let busy = state.work_in_progress.load(Ordering::SeqCst) > 0;
+    let mut guard = state.session.lock().unwrap();
+    match guard.as_ref() {
+        None => Err("Wallet is locked".to_string()),
+        Some(s) if s.is_expired() && !busy => {
+            *guard = None;
+            Err("Session expired — please unlock again".to_string())
         }
-    }
-    Ok(())
-}
-
-/// Set the cached PIN, zeroizing any previous value first.
-fn set_cached_pin(state: &State<'_, AppState>, new_pin: Option<String>) {
-    let mut guard = state.cached_pin.lock().unwrap();
-    if let Some(ref mut old) = *guard {
-        old.zeroize();
-    }
-    *guard = new_pin;
-}
-
-/// RAII guard: sets `work_in_progress = true` on creation, clears it on drop.
-/// Guarantees the flag is cleared on every return path, including `?`-returns.
-///
-/// On drop it also resets the session activity timer, so the inactivity
-/// timeout is measured from the END of the long-running operation (e.g.
-/// multi-minute proof building) rather than its start — otherwise the screen
-/// would lock the instant the build finishes.
-struct WorkInProgressGuard<'a> {
-    flag: &'a Mutex<bool>,
-    last_activity: &'a Mutex<Option<Instant>>,
-}
-
-impl<'a> WorkInProgressGuard<'a> {
-    fn new(flag: &'a Mutex<bool>, last_activity: &'a Mutex<Option<Instant>>) -> Self {
-        *flag.lock().unwrap() = true;
-        Self {
-            flag,
-            last_activity,
-        }
+        Some(s) => Ok((s.entropy.clone(), s.keys.clone())),
     }
 }
 
-impl<'a> Drop for WorkInProgressGuard<'a> {
+/// Reset the idle timer of a live session.
+fn touch_session(state: &AppState) {
+    if let Some(s) = state.session.lock().unwrap().as_mut() {
+        s.touch();
+    }
+}
+
+fn open_session(state: &AppState, entropy: WalletEntropy) {
+    *state.session.lock().unwrap() = Some(Session::new(entropy));
+}
+
+fn close_session(state: &AppState) {
+    *state.session.lock().unwrap() = None;
+}
+
+/// Marks a long-running operation; on drop it ends the operation and resets
+/// the idle timer, so the timeout counts from the end of the operation.
+struct WorkGuard<'a> {
+    state: &'a AppState,
+}
+
+impl<'a> WorkGuard<'a> {
+    fn new(state: &'a AppState) -> Self {
+        state.work_in_progress.fetch_add(1, Ordering::SeqCst);
+        Self { state }
+    }
+}
+
+impl Drop for WorkGuard<'_> {
     fn drop(&mut self) {
-        *self.flag.lock().unwrap() = false;
-        *self.last_activity.lock().unwrap() = Some(Instant::now());
+        self.state.work_in_progress.fetch_sub(1, Ordering::SeqCst);
+        touch_session(self.state);
     }
 }
 
-// ── Seed / Wallet Commands ───────────────────────────────────
+fn entropy_from_seed_bytes(bytes: &[u8]) -> Result<WalletEntropy, String> {
+    let words = seed::entropy_to_words(bytes)?;
+    keys::wallet_entropy_from_phrase(&words)
+}
 
-#[tauri::command]
-fn wallet_exists(app: tauri::AppHandle) -> Result<bool, String> {
-    let path = seed::seed_file_path(&app)?;
-    Ok(seed::seed_exists(&path))
+/// Check `pin` against the seed file, subject to the persisted attempt
+/// limiter. Returns the decrypted seed entropy.
+async fn check_password(
+    app: &tauri::AppHandle,
+    state: &AppState,
+    pin: &str,
+) -> Result<Zeroizing<Vec<u8>>, String> {
+    let dir = app_dir(app)?;
+    PasswordLimiter::load(&dir).check(session::epoch_secs())?;
+
+    let path = seed::seed_file_path(app)?;
+    let encrypted = seed::load_seed_file(&path).map_err(String::from)?;
+    let pin = Zeroizing::new(pin.to_string());
+    let result = tokio::task::spawn_blocking(move || seed::decrypt_seed(&encrypted, &pin))
+        .await
+        .map_err(|e| format!("Password check failed: {e}"))?;
+
+    let _guard = state.limiter_lock.lock().unwrap();
+    let mut limiter = PasswordLimiter::load(&dir);
+    match result {
+        Ok(entropy) => {
+            if !limiter.is_clean() {
+                limiter.record_success();
+                limiter.save(&dir);
+            }
+            Ok(entropy)
+        }
+        Err(seed::SeedError::WrongPassword) => {
+            let msg = limiter.record_failure(session::epoch_secs());
+            limiter.save(&dir);
+            Err(msg)
+        }
+        Err(e) => Err(e.to_string()),
+    }
 }
 
 /// Minimum password length enforced at the backend boundary.
 const MIN_PASSWORD_LEN: usize = 8;
 
 fn validate_password(pin: &str) -> Result<(), String> {
-    if pin.len() < MIN_PASSWORD_LEN {
+    if pin.chars().count() < MIN_PASSWORD_LEN {
         return Err(format!(
             "Password must be at least {} characters",
             MIN_PASSWORD_LEN
@@ -182,19 +185,43 @@ fn validate_password(pin: &str) -> Result<(), String> {
 
 /// Remove all on-disk per-wallet runtime artifacts and reset the in-memory
 /// pending flag. Called whenever the active wallet changes (create / import /
-/// delete): a different seed is a different wallet, so any pending-transaction
-/// or outgoing-history state from the previous wallet is invalid and must not
-/// leak into the new one (e.g. a stale "pending" banner that disables Send).
-fn reset_wallet_runtime(app: &tauri::AppHandle, state: &State<'_, AppState>) {
+/// delete): a different seed is a different wallet, so any pending-transaction,
+/// history or scan state from the previous wallet is invalid and must not leak
+/// into the new one.
+fn reset_wallet_runtime(app: &tauri::AppHandle, state: &AppState) {
     *state.has_pending_tx.lock().unwrap() = false;
     if let Ok(dir) = app.path().app_data_dir() {
         let _ = std::fs::remove_file(dir.join("pending_tx.json"));
         let _ = std::fs::remove_file(dir.join("outgoing_history.json"));
+        let _ = std::fs::remove_file(PasswordLimiter::file_path(&dir));
+        sync::delete_scan_cache(&dir);
     }
 }
 
+async fn encrypt_and_save(
+    path: PathBuf,
+    entropy: Zeroizing<Vec<u8>>,
+    pin: String,
+) -> Result<(), String> {
+    let pin = Zeroizing::new(pin);
+    let encrypted = tokio::task::spawn_blocking(move || seed::encrypt_seed(&entropy, &pin))
+        .await
+        .map_err(|e| format!("Encryption task failed: {e}"))??;
+    seed::save_seed_file(&path, &encrypted)
+}
+
+// ── Seed / Wallet Commands ───────────────────────────────────
+
 #[tauri::command]
-fn create_wallet(
+fn wallet_exists(app: tauri::AppHandle) -> Result<bool, String> {
+    let path = seed::seed_file_path(&app)?;
+    Ok(seed::seed_exists(&path))
+}
+
+/// Create a new wallet and open a session for it (the user goes straight to
+/// the backup quiz and then the wallet, without unlocking again).
+#[tauri::command]
+async fn create_wallet(
     app: tauri::AppHandle,
     pin: String,
     state: State<'_, AppState>,
@@ -205,17 +232,19 @@ fn create_wallet(
         return Err("Wallet already exists".to_string());
     }
     let mnemonic = seed::generate_mnemonic()?;
-    let entropy = seed::mnemonic_to_entropy(&mnemonic);
-    let encrypted = seed::encrypt_seed(&entropy, &pin)?;
-    seed::save_seed_file(&path, &encrypted)?;
-    // New wallet → wipe any leftover runtime state from a previous one.
-    reset_wallet_runtime(&app, &state);
+    let entropy_bytes = seed::mnemonic_to_entropy(&mnemonic);
     let words: Vec<String> = mnemonic.words().map(|w| w.to_string()).collect();
+    let entropy = keys::wallet_entropy_from_phrase(&words)?;
+
+    encrypt_and_save(path, entropy_bytes, pin).await?;
+    // New wallet → wipe any leftover runtime state from a previous one.
+    reset_wallet_runtime(&app, state.inner());
+    open_session(state.inner(), entropy);
     Ok(words)
 }
 
 #[tauri::command]
-fn import_wallet(
+async fn import_wallet(
     app: tauri::AppHandle,
     words: String,
     pin: String,
@@ -224,110 +253,83 @@ fn import_wallet(
     validate_password(&pin)?;
     let path = seed::seed_file_path(&app)?;
     let mnemonic = seed::validate_mnemonic(&words)?;
-    let entropy = seed::mnemonic_to_entropy(&mnemonic);
-    let encrypted = seed::encrypt_seed(&entropy, &pin)?;
-    seed::save_seed_file(&path, &encrypted)?;
+    let entropy_bytes = seed::mnemonic_to_entropy(&mnemonic);
+    let phrase: Vec<String> = mnemonic.words().map(|w| w.to_string()).collect();
+    let entropy = keys::wallet_entropy_from_phrase(&phrase)?;
 
+    encrypt_and_save(path, entropy_bytes, pin).await?;
     // A different seed is a different wallet: wipe the previous wallet's
-    // pending-transaction and outgoing-history state so it can't block or
-    // mislead the new one.
-    reset_wallet_runtime(&app, &state);
-
-    // Establish a fresh unlocked session bound to the NEW PIN, so address
-    // derivation and sync use the imported wallet's key — not a PIN cached from
-    // a previously-unlocked wallet.
-    *state.wallet_unlocked.lock().unwrap() = true;
-    set_cached_pin(&state, Some(pin));
-    *state.failed_pin_attempts.lock().unwrap() = 0;
-    *state.lockout_until.lock().unwrap() = None;
-    touch_session(&state);
+    // runtime state so it can't block or mislead the new one.
+    reset_wallet_runtime(&app, state.inner());
+    open_session(state.inner(), entropy);
     Ok(())
 }
 
 #[tauri::command]
-fn unlock_wallet(
+async fn unlock_wallet(
     app: tauri::AppHandle,
     pin: String,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    // Check PIN rate limiting
-    // Note: extract value first so the MutexGuard is dropped before re-acquiring.
-    let lockout_until = *state.lockout_until.lock().unwrap();
-    if let Some(until) = lockout_until {
-        let remaining = PIN_COOLDOWN_SECS.saturating_sub(until.elapsed().as_secs());
-        if remaining > 0 {
-            return Err(format!("Too many attempts. Wait {} seconds.", remaining));
-        }
-        // Cooldown expired — reset
-        *state.lockout_until.lock().unwrap() = None;
-        *state.failed_pin_attempts.lock().unwrap() = 0;
-    }
-
     let path = seed::seed_file_path(&app)?;
-    let encrypted = seed::load_seed_file(&path)?;
+    let encrypted = seed::load_seed_file(&path).map_err(String::from)?;
+    let was_v1 = !seed::is_v2_format(&encrypted);
 
-    match seed::decrypt_seed(&encrypted, &pin) {
-        Ok(entropy) => {
-            // Success — reset attempts and start session
-            *state.failed_pin_attempts.lock().unwrap() = 0;
-            *state.lockout_until.lock().unwrap() = None;
+    let entropy_bytes = check_password(&app, state.inner(), &pin).await?;
 
-            // Auto-migrate v1 (SHA-256) seed files to v2 (Argon2id) on unlock
-            if !is_v2_format(&encrypted) {
-                seed::migrate_v1_to_v2(&path, &entropy, &pin)?;
-            }
-
-            *state.wallet_unlocked.lock().unwrap() = true;
-            set_cached_pin(&state, Some(pin));
-            touch_session(&state);
-            Ok(())
-        }
-        Err(_) => {
-            let mut attempts = state.failed_pin_attempts.lock().unwrap();
-            *attempts += 1;
-            if *attempts >= MAX_PIN_ATTEMPTS {
-                *state.lockout_until.lock().unwrap() = Some(Instant::now());
-                Err(format!(
-                    "Wrong password. Too many attempts — locked for {} seconds.",
-                    PIN_COOLDOWN_SECS
-                ))
-            } else {
-                let remaining = MAX_PIN_ATTEMPTS - *attempts;
-                Err(format!("Wrong password. {} attempts remaining.", remaining))
-            }
-        }
+    // Auto-migrate v1 (SHA-256) seed files to v2 (Argon2id) on unlock.
+    if was_v1 {
+        let bytes = entropy_bytes.clone();
+        let pin = Zeroizing::new(pin);
+        tokio::task::spawn_blocking(move || seed::migrate_v1_to_v2(&path, &bytes, &pin))
+            .await
+            .map_err(|e| format!("Migration task failed: {e}"))??;
     }
+
+    let entropy = entropy_from_seed_bytes(&entropy_bytes)?;
+    open_session(state.inner(), entropy);
+    Ok(())
 }
 
 #[tauri::command]
 fn lock_wallet(state: State<'_, AppState>) -> Result<(), String> {
-    *state.wallet_unlocked.lock().unwrap() = false;
-    set_cached_pin(&state, None);
-    *state.last_activity.lock().unwrap() = None;
+    close_session(state.inner());
     Ok(())
 }
 
 #[tauri::command]
 fn is_session_valid(state: State<'_, AppState>) -> bool {
-    check_session(&state).is_ok()
+    active_session(state.inner()).is_ok()
 }
 
+/// Reset the idle timer on user activity — but never revive a session that
+/// has already timed out.
 #[tauri::command]
 fn touch_activity(state: State<'_, AppState>) {
-    if state.wallet_unlocked.lock().unwrap().clone() {
-        touch_session(&state);
+    let busy = state.work_in_progress.load(Ordering::SeqCst) > 0;
+    let mut guard = state.session.lock().unwrap();
+    let expired = guard.as_ref().map(|s| s.is_expired() && !busy);
+    match expired {
+        Some(true) => *guard = None,
+        Some(false) => {
+            if let Some(s) = guard.as_mut() {
+                s.touch();
+            }
+        }
+        None => {}
     }
 }
 
 #[tauri::command]
-fn export_seed_phrase(app: tauri::AppHandle, pin: String) -> Result<Vec<String>, String> {
-    let path = seed::seed_file_path(&app)?;
-    let encrypted = seed::load_seed_file(&path)?;
-    let entropy = seed::decrypt_seed(&encrypted, &pin)?;
-    let mnemonic =
-        bip39::Mnemonic::from_entropy(&entropy).map_err(|e| format!("Invalid entropy: {}", e))?;
-    let words: Vec<String> = mnemonic.words().map(|w| w.to_string()).collect();
-    Ok(words)
+async fn export_seed_phrase(
+    app: tauri::AppHandle,
+    pin: String,
+    state: State<'_, AppState>,
+) -> Result<Vec<String>, String> {
+    active_session(state.inner())?;
+    let entropy = check_password(&app, state.inner(), &pin).await?;
+    let words = seed::entropy_to_words(&entropy)?;
+    Ok(words.to_vec())
 }
 
 #[tauri::command]
@@ -335,45 +337,42 @@ fn delete_wallet(app: tauri::AppHandle, state: State<'_, AppState>) -> Result<()
     let path = seed::seed_file_path(&app)?;
     seed::delete_seed_file(&path)?;
     // Wipe runtime state and log out — no wallet is active anymore.
-    reset_wallet_runtime(&app, &state);
-    *state.wallet_unlocked.lock().unwrap() = false;
-    set_cached_pin(&state, None);
-    *state.last_activity.lock().unwrap() = None;
+    reset_wallet_runtime(&app, state.inner());
+    close_session(state.inner());
     Ok(())
 }
 
 // ── Local Key Derivation Commands ───────────────────────────────
 // These run entirely on-device. No network calls needed.
 
-/// Helper: decrypt seed → mnemonic words → WalletEntropy
-fn get_wallet_entropy(app: &tauri::AppHandle, pin: &str) -> Result<WalletEntropy, String> {
-    let path = seed::seed_file_path(app)?;
-    let encrypted = seed::load_seed_file(&path)?;
-    let entropy_bytes = seed::decrypt_seed(&encrypted, pin)?;
-    let mnemonic = bip39::Mnemonic::from_entropy(&entropy_bytes)
-        .map_err(|e| format!("Invalid entropy: {}", e))?;
-    let words: Vec<String> = mnemonic.words().map(|w| w.to_string()).collect();
-    keys::wallet_entropy_from_phrase(&words)
+/// Network to encode addresses for: the connected node's, else the hint.
+fn resolve_network(state: &AppState, hint: Option<String>) -> Result<Network, String> {
+    if state.rpc.lock().unwrap().is_some() {
+        return Ok(*state.network.lock().unwrap());
+    }
+    match hint {
+        Some(h) => keys::parse_network(&h),
+        None => Ok(*state.network.lock().unwrap()),
+    }
 }
 
 #[tauri::command]
-fn generate_local_address(
-    app: tauri::AppHandle,
+async fn generate_local_address(
     pin: Option<String>,
     index: u64,
     key_type: Option<String>,
     network: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<String, String> {
-    check_session(&state)?;
-    let actual_pin = pin.unwrap_or_else(|| get_cached_pin(&state).unwrap_or_default());
-    if actual_pin.is_empty() {
-        return Err("PIN required".to_string());
-    }
-    let entropy = get_wallet_entropy(&app, &actual_pin)?;
-    let kt = key_type.as_deref().unwrap_or("generation");
-    let net = network.as_deref().unwrap_or("mainnet");
-    keys::derive_receiving_address(&entropy, index, kt, net)
+    let _ = pin; // the session holds the keys
+    let (entropy, keys) = active_session(state.inner())?;
+    let kt = keys::key_type_from_str(key_type.as_deref().unwrap_or("generation"))?;
+    let net = resolve_network(state.inner(), network)?;
+    tokio::task::spawn_blocking(move || {
+        keys::derive_receiving_address(&keys, &entropy, index, kt, net)
+    })
+    .await
+    .map_err(|e| format!("Address generation task failed: {e}"))?
 }
 
 /// The one main receiving address of each type (index 0), shown on the wallet.
@@ -385,50 +384,78 @@ struct MainAddresses {
 }
 
 /// Derive the wallet's three main addresses (generation, EC-hybrid, viewing —
-/// all at index 0) in one call. Run on the blocking pool because seed
-/// decryption (argon2) and the generation-address lattice keygen are heavy:
-/// doing them on the main thread froze the UI. Called once on unlock/import so
-/// the wallet can show addresses instantly from cache afterwards.
+/// all at index 0) in one call, off the main thread (generation-address
+/// lattice key generation is heavy).
 #[tauri::command]
 async fn generate_main_addresses(
-    app: tauri::AppHandle,
     pin: Option<String>,
     network: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<MainAddresses, String> {
-    check_session(&state)?;
-    let actual_pin = pin.unwrap_or_else(|| get_cached_pin(&state).unwrap_or_default());
-    if actual_pin.is_empty() {
-        return Err("PIN required".to_string());
-    }
-    let net = network.unwrap_or_else(|| "mainnet".to_string());
-
+    let _ = pin; // the session holds the keys
+    let (entropy, keys) = active_session(state.inner())?;
+    let net = resolve_network(state.inner(), network)?;
     tokio::task::spawn_blocking(move || -> Result<MainAddresses, String> {
-        let entropy = get_wallet_entropy(&app, &actual_pin)?;
         Ok(MainAddresses {
-            generation: keys::derive_receiving_address(&entropy, 0, "generation", &net)?,
-            ec_hybrid: keys::derive_receiving_address(&entropy, 0, "ec_hybrid", &net)?,
-            viewing_address: keys::derive_receiving_address(&entropy, 0, "viewing_address", &net)?,
+            generation: keys::derive_receiving_address(
+                &keys,
+                &entropy,
+                0,
+                KeyType::Generation,
+                net,
+            )?,
+            ec_hybrid: keys::derive_receiving_address(&keys, &entropy, 0, KeyType::EcHybrid, net)?,
+            viewing_address: keys::derive_receiving_address(
+                &keys,
+                &entropy,
+                0,
+                KeyType::ViewingAddress,
+                net,
+            )?,
         })
     })
     .await
     .map_err(|e| format!("Address generation task failed: {e}"))?
 }
 
-/// Send NPT: build transaction locally and submit to supporter.
-/// This is the complete send pipeline:
-/// 1. Get chain tip (mutator set accumulator)
-/// 2. Select input UTXOs
-/// 3. Build TransactionDetails with on-chain notifications
-/// 4. If post-HF-β, attach lustration announcements (requires user opt-in)
-/// 5. Generate ProofCollection (STARK proofs — may take minutes)
-/// 6. Submit via wallet_submitTransaction
-///
-/// `accept_lustrations`: if any input falls under the lustration barrier
-/// (HF-β at block 38,000), the user must confirm before the tx is built.
-/// When required-but-not-accepted, returns an error prefixed
-/// `LUSTRATION_REQUIRED:<threshold>` so the UI can prompt and retry.
+/// Validate a recipient address for the connected network.
 #[tauri::command]
+fn validate_address(address: String, state: State<'_, AppState>) -> keys::AddressValidation {
+    let network = *state.network.lock().unwrap();
+    keys::validate_address(&address, network)
+}
+
+// ── Pending transaction tracking ─────────────────────────────
+
+fn pending_file(app: &tauri::AppHandle) -> Option<PathBuf> {
+    app.path()
+        .app_data_dir()
+        .ok()
+        .map(|dir| dir.join("pending_tx.json"))
+}
+
+/// Pending flag from memory, falling back to disk (survives restarts).
+fn pending_exists(app: &tauri::AppHandle, state: &AppState) -> bool {
+    if *state.has_pending_tx.lock().unwrap() {
+        return true;
+    }
+    if pending_file(app).map(|p| p.exists()).unwrap_or(false) {
+        *state.has_pending_tx.lock().unwrap() = true;
+        return true;
+    }
+    false
+}
+
+/// Send NPT: build the transaction locally, prove it and submit it to the
+/// supporter. Requires the password. Progress is emitted as `send_state`
+/// events. Returns a JSON string with `success`, `txid`, `outputs` and the
+/// outputs' addition records (for confirmation tracking).
+///
+/// `accept_lustrations`: if any input falls under the lustration barrier, the
+/// user must confirm first; otherwise the error `LUSTRATION_REQUIRED:<n>` is
+/// returned so the UI can prompt and retry.
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
 async fn send_transaction(
     app: tauri::AppHandle,
     pin: String,
@@ -439,445 +466,112 @@ async fn send_transaction(
     scan_window: Option<sync::ScanWindow>,
     state: State<'_, AppState>,
 ) -> Result<String, String> {
-    check_session(&state)?;
-    touch_session(&state);
+    let st = state.inner();
+    let (_, keys) = active_session(st)?;
+    touch_session(st);
 
-    // Mark this as a long-running operation so the session timer doesn't
-    // expire during proof generation (which can take several minutes).
-    // The guard is dropped automatically on every return path.
-    let _work_guard = WorkInProgressGuard::new(&state.work_in_progress, &state.last_activity);
+    let _send_guard = st
+        .send_lock
+        .try_lock()
+        .map_err(|_| "A transaction is already being prepared.".to_string())?;
+    // Keep the session alive while proving (can take minutes).
+    let _work = WorkGuard::new(st);
 
-    // Block sending while a previous transaction is pending (prevents double-spend)
-    // Check both in-memory flag and disk file (handles app restart)
-    let is_pending = {
-        let in_memory = *state.has_pending_tx.lock().unwrap();
-        if in_memory {
-            true
-        } else if let Ok(dir) = app.path().app_data_dir() {
-            let path = dir.join("pending_tx.json");
-            if path.exists() {
-                *state.has_pending_tx.lock().unwrap() = true;
-                true
-            } else {
-                false
-            }
-        } else {
-            false
-        }
-    };
-    if is_pending {
+    if pending_exists(&app, st) {
         return Err(
-            "A transaction is already pending. Wait for it to be mined or clear it before sending again.".to_string()
-        );
-    }
-
-    let rpc = get_rpc(&state)?;
-    let entropy = get_wallet_entropy(&app, &pin)?;
-
-    // Parse amounts
-    let amount_val = NativeCurrencyAmount::coins_from_str(&amount)
-        .map_err(|e| format!("Invalid amount: {}", e))?;
-    let fee_val =
-        NativeCurrencyAmount::coins_from_str(&fee).map_err(|e| format!("Invalid fee: {}", e))?;
-
-    // Parse recipient address
-    let network = Network::Main;
-    let recipient = ReceivingAddress::from_bech32m(&recipient_address, network)
-        .map_err(|e| format!("Invalid address: {}", e))?;
-
-    // Step 1: Re-scan to get fresh UTXOs with spending data. Use the same
-    // per-type window the UI scanned, so funds received at a freshly generated
-    // (higher-index) address remain spendable.
-    debug_log!("[SEND] Step 1: Scanning for UTXOs...");
-    let sync_result = sync::scan_for_utxos(&rpc, &entropy, scan_window.unwrap_or_default()).await?;
-    let unspent_utxos: Vec<_> = sync_result
-        .utxos
-        .iter()
-        .filter(|u| !u.likely_spent)
-        .collect();
-    if unspent_utxos.is_empty() {
-        return Err("No unspent UTXOs found. Sync your wallet first.".to_string());
-    }
-
-    // Early balance check + select UTXOs to cover amount
-
-    let total_needed = amount_val
-        .checked_add(&fee_val)
-        .ok_or("Amount + fee overflow")?;
-
-    // Step 2: Select UTXOs to cover amount (smallest-first strategy)
-    debug_log!("[SEND] Step 2: Selecting UTXOs...");
-
-    // Deserialize all unspent UTXOs with their amounts
-    struct UtxoInput {
-        utxo: Utxo,
-        sender_randomness: Digest,
-        receiver_preimage: Digest,
-        aocl_leaf_index: u64,
-        amount: NativeCurrencyAmount,
-        data: sync::DiscoveredUtxo,
-    }
-
-    let mut all_inputs: Vec<UtxoInput> = Vec::new();
-    for u in &unspent_utxos {
-        let utxo = &u.utxo;
-        let amount = utxo.get_native_currency_amount();
-        let sender_randomness = u.sender_randomness;
-        let receiver_preimage = u.receiver_preimage;
-        let aocl_leaf_index = u.aocl_leaf_index.ok_or("Missing AOCL leaf index")?;
-
-        all_inputs.push(UtxoInput {
-            utxo: utxo.to_owned(),
-            sender_randomness,
-            receiver_preimage,
-            aocl_leaf_index,
-            amount,
-            data: (*u).clone(),
-        });
-    }
-
-    // Sort by amount (largest first — minimizes number of inputs needed)
-    all_inputs.sort_by(|a, b| {
-        b.amount
-            .partial_cmp(&a.amount)
-            .unwrap_or(std::cmp::Ordering::Equal)
-    });
-
-    // Select UTXOs until we cover the needed amount
-    let mut selected: Vec<UtxoInput> = Vec::new();
-    let mut accumulated = NativeCurrencyAmount::zero();
-    for input in all_inputs {
-        accumulated = accumulated + input.amount;
-        selected.push(input);
-        if accumulated >= total_needed {
-            break;
-        }
-    }
-
-    // Check input count — too many inputs means proof generation exceeds block time
-    const MAX_INPUTS: usize = 10;
-    if selected.len() > MAX_INPUTS {
-        return Err(format!(
-            "Transaction needs {} UTXOs but maximum is {} to keep proof generation \
-             under the block time (~10 minutes). Please send a smaller amount.",
-            selected.len(),
-            MAX_INPUTS
-        ));
-    }
-
-    if accumulated < total_needed {
-        return Err(format!(
-            "Insufficient balance: have {}, need {} (amount {} + fee {})",
-            accumulated, total_needed, amount, fee
-        ));
-    }
-
-    debug_log!(
-        "[SEND] Selected {} UTXOs totaling {} to cover {}",
-        selected.len(),
-        accumulated,
-        total_needed
-    );
-
-    // Step 3: Get chain tip
-    debug_log!("[SEND] Step 3: Getting chain tip...");
-    let tip_resp = rpc.tip().await.map_err(|e| format!("tip: {}", e))?;
-    let tip_height = u64::from(tip_resp.block.kernel.header.height);
-    debug_log!("[SEND] Chain tip at height {}", tip_height);
-    transaction::ensure_no_imminent_hardfork(network, BlockHeight::from(tip_height))?;
-    let consensus_rule_set = ConsensusRuleSet::infer_from(network, BlockHeight::from(tip_height));
-
-    // Step 4-7: For EACH selected UTXO: compute AOCL index, get membership proof, unlock
-    debug_log!("[SEND] Steps 4-7: Processing {} inputs...", selected.len());
-    let mut all_abs_index_sets = Vec::new();
-
-    // Compute AOCL index and AbsoluteIndexSet for each input
-    for (idx, input) in selected.iter().enumerate() {
-        let block_height = input.data.block_height;
-        debug_log!(
-            "[SEND] Input {}: block {}, amount {}",
-            idx,
-            block_height,
-            input.amount
-        );
-
-        // Find our commitment
-        let utxo_hash = Tip5::hash(&input.utxo);
-        let aocl_idx = input.aocl_leaf_index;
-        debug_log!("[SEND] Input {}: AOCL index {}", idx, aocl_idx,);
-
-        let abs_set = AbsoluteIndexSet::compute(
-            utxo_hash,
-            input.sender_randomness,
-            input.receiver_preimage,
-            aocl_idx,
-        );
-        all_abs_index_sets.push(abs_set);
-    }
-
-    // Batch restore membership proofs for ALL inputs
-    debug_log!(
-        "[SEND] Step 6: Restoring {} membership proofs...",
-        all_abs_index_sets.len()
-    );
-    let restore_resp = rpc
-        .restore_membership_proof(all_abs_index_sets)
-        .await
-        .map_err(|e| format!("restore_membership_proof: {}", e))?;
-    let snapshot = restore_resp.snapshot;
-    let tip_msa: MutatorSetAccumulator = snapshot.synced_mutator_set.into();
-
-    // Create UnlockedUtxo for each input
-    debug_log!(
-        "[SEND] Step 7: Creating {} UnlockedUtxos...",
-        selected.len()
-    );
-    let mut unlocked_utxos = Vec::new();
-    for (idx, (input, proof_data)) in selected
-        .iter()
-        .zip(snapshot.membership_proofs.into_iter())
-        .enumerate()
-    {
-        let membership_proof = proof_data
-            .extract_ms_membership_proof(
-                input.aocl_leaf_index,
-                input.sender_randomness,
-                input.receiver_preimage,
-            )
-            .ok_or(format!("Extract proof failed for input {}", idx))?;
-
-        // Reconstruct the unlocking key from the UTXO's stored key type +
-        // index. Covers all key types (generation, symmetric, EC-hybrid,
-        // viewing), so UTXOs received at the new address formats can be spent.
-        let spending_key =
-            keys::spending_key_for(&entropy, &input.data.key_type, input.data.key_index)?;
-
-        unlocked_utxos.push(UnlockedUtxo::unlock(
-            input.utxo.clone(),
-            spending_key.lock_script_and_witness(),
-            membership_proof,
-        ));
-    }
-    debug_log!("[SEND] {} UnlockedUtxos created", unlocked_utxos.len());
-
-    // Step 8: Build outputs
-    debug_log!("[SEND] Step 8: Building outputs...");
-    let tip_block_height = BlockHeight::from(tip_height);
-    let change_key = SpendingKey::Symmetric(entropy.nth_symmetric_key(0));
-    let change_address = change_key.to_address();
-
-    let recipient_privacy_digest = recipient.privacy_digest();
-    let recipient_sender_randomness =
-        entropy.generate_sender_randomness(tip_block_height, recipient_privacy_digest);
-    let recipient_output = TxOutput::onchain_native_currency(
-        amount_val,
-        recipient_sender_randomness,
-        recipient,
-        false,
-    );
-
-    let mut tx_outputs = TxOutputList::from(vec![recipient_output]);
-    if let Some(change_amount) = accumulated.checked_sub(&total_needed) {
-        if change_amount > NativeCurrencyAmount::zero() {
-            let change_privacy_digest = change_address.privacy_digest();
-            let change_sender_randomness =
-                entropy.generate_sender_randomness(tip_block_height, change_privacy_digest);
-            let change_output = TxOutput::onchain_native_currency(
-                change_amount,
-                change_sender_randomness,
-                change_address.into(),
-                true,
-            );
-            tx_outputs.push(change_output);
-        }
-    }
-    debug_log!("[SEND] {} outputs created", tx_outputs.len());
-
-    // Step 8.5: Lustration check (HF-β at block 38,000).
-    // If the chain has a lustration barrier and any of our inputs fall at
-    // or below the threshold, the supporter will reject the tx unless it
-    let transparent_inputs: Vec<TransparentInput> = selected
-        .iter()
-        .map(|input| TransparentInput {
-            utxo: input.utxo.clone(),
-            aocl_leaf_index: input.aocl_leaf_index,
-            sender_randomness: input.sender_randomness,
-            receiver_preimage: input.receiver_preimage,
-        })
-        .collect();
-    let pow: BlockPow = tip_resp.block.kernel.header.pow.into();
-    let lustration_status_result = pow.lustration_status();
-    let lustration_announcements: Vec<Announcement> = match lustration_status_result {
-        Ok(status) => Announcement::lustration_announcements(status, &transparent_inputs),
-        Err(_) => vec![], // pre-HF-β chain, no lustration field
-    };
-    if !lustration_announcements.is_empty() && !accept_lustrations.unwrap_or(false) {
-        let status = lustration_status_result
-            .expect("lustration_status must be Ok since we generated announcements");
-        return Err(format!(
-            "LUSTRATION_REQUIRED:{}",
-            status.max_lustrating_aocl_leaf_index
-        ));
-    }
-
-    // Step 9: Build TransactionDetails
-    debug_log!("[SEND] Step 9: Building TransactionDetails...");
-    let timestamp = Timestamp::now();
-    let mut transaction_details = TransactionDetails::new_without_coinbase(
-        unlocked_utxos,
-        tx_outputs,
-        fee_val,
-        timestamp,
-        tip_msa,
-        network,
-    );
-    if !lustration_announcements.is_empty() {
-        debug_log!(
-            "[SEND] Attaching {} lustration announcement(s)",
-            lustration_announcements.len()
-        );
-        transaction_details = transaction_details.with_announcements(lustration_announcements);
-    }
-    debug_log!(
-        "[SEND] TransactionDetails built ({} inputs)",
-        selected.len()
-    );
-
-    // Step 9.5: Validate membership proof before expensive proof generation
-    debug_log!("[SEND] Step 9.5: Validating membership proof...");
-    {
-        let msa = &transaction_details.mutator_set_accumulator;
-        let pw = transaction_details.primitive_witness();
-
-        for (idx, (input, proof)) in selected
-            .iter()
-            .zip(pw.input_membership_proofs.iter())
-            .enumerate()
-        {
-            let item = Tip5::hash(&input.utxo);
-            let is_valid = msa.verify(item, proof);
-            debug_log!("[SEND] Input {} membership proof valid: {}", idx, is_valid);
-            if !is_valid {
-                return Err(format!(
-                    "Membership proof validation failed for input {}. \
-                     AOCL index: {}, MSA AOCL leafs: {}.",
-                    idx,
-                    input.aocl_leaf_index,
-                    msa.aocl.num_leafs()
-                ));
-            }
-        }
-        debug_log!("[SEND] All {} membership proofs valid", selected.len());
-
-        // Full validation — checks removal records, lock scripts, amounts
-        debug_log!("[SEND] Running full transaction validation...");
-        match tokio::task::spawn_blocking(move || {
-            tokio::runtime::Handle::current().block_on(pw.validate())
-        })
-        .await
-        {
-            Ok(Ok(())) => debug_log!("[SEND] Full validation PASSED"),
-            Ok(Err(e)) => {
-                return Err(format!("Transaction validation FAILED: {:?}", e));
-            }
-            Err(e) => {
-                return Err(format!("Validation task error: {}", e));
-            }
-        }
-    }
-
-    // Step 10: Generate ProofCollection (THIS IS THE SLOW STEP)
-    // Keep session alive during long proof generation
-    *state.last_activity.lock().unwrap() = Some(Instant::now());
-    debug_log!("[SEND] Step 10: Generating ProofCollection — this may take several minutes...");
-    let tx = transaction::build_transaction(&transaction_details, consensus_rule_set)
-        .await
-        .map_err(|e| format!("ProofCollection failed: {}", e))?;
-    // Keep session alive after proof generation
-    *state.last_activity.lock().unwrap() = Some(Instant::now());
-    debug_log!("[SEND] Transaction built!");
-
-    // Step 11: Submit transaction
-    debug_log!("[SEND] Step 11: Submitting transaction...");
-    let rpc_tx: RpcTransaction = tx
-        .try_into()
-        .map_err(|e: String| format!("Convert to RPC transaction: {}", e))?;
-    let submit_resp = rpc
-        .submit_transaction(rpc_tx)
-        .await
-        .map_err(|e| format!("submit_transaction: {}", e))?;
-    if !submit_resp.success {
-        return Err(
-            "Supporter rejected the transaction (submit_transaction returned success=false)"
+            "A transaction is already pending. Wait for it to be mined or clear it before \
+             sending again."
                 .to_string(),
         );
     }
-    debug_log!("[SEND] Submitted!");
 
-    // Return addition records as JSON for tracking confirmation via wasMined
-    let kernel = transaction_details.transaction_kernel();
-    let addition_jsons: Vec<String> = kernel
-        .outputs
-        .iter()
-        .map(|ar| {
-            let rpc_ar = RpcAdditionRecord::from(*ar);
-            serde_json::to_string(&rpc_ar).unwrap_or_default()
-        })
-        .collect();
-    debug_log!(
-        "[SEND] Output addition records ({} outputs): {:?}",
-        addition_jsons.len(),
-        addition_jsons
-    );
+    let rpc = get_rpc(st)?;
+    let network = *st.network.lock().unwrap();
 
-    // Mark pending — blocks further sends until confirmed or cleared
-    *state.has_pending_tx.lock().unwrap() = true;
+    // Authorize with the password (counts towards the attempt limit).
+    let entropy_bytes = check_password(&app, st, &pin).await?;
+    let entropy = entropy_from_seed_bytes(&entropy_bytes)?;
 
-    // Persist pending state to disk (survives app restart)
-    let pending_data = serde_json::json!({
-        "addition_record_hexes": addition_jsons,
-        "timestamp": std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_secs())
-            .unwrap_or(0),
+    // Fresh view of the wallet's coins (incremental: cheap after a sync).
+    let dir = app_dir(&app)?;
+    let scan = {
+        let _scan_guard = st.scan_lock.lock().await;
+        sync::scan_for_utxos(&rpc, &entropy, &keys, network, scan_window, &dir).await?
+    };
+
+    let request = send::SendRequest {
+        recipient: recipient_address.clone(),
+        amount,
+        fee,
+        accept_lustrations: accept_lustrations.unwrap_or(false),
+    };
+    let progress_app = app.clone();
+    let progress: send::ProgressFn = Arc::new(move |p| {
+        let _ = progress_app.emit("send_state", p);
     });
-    if let Ok(dir) = app.path().app_data_dir() {
-        let _ = std::fs::create_dir_all(&dir);
-        let _ = std::fs::write(
-            dir.join("pending_tx.json"),
-            serde_json::to_string_pretty(&pending_data).unwrap_or_default(),
-        );
-        debug_log!("[SEND] Pending state persisted to disk");
+    let outcome = send::send(
+        &rpc,
+        &entropy,
+        &keys,
+        network,
+        &scan.utxos,
+        &request,
+        progress,
+    )
+    .await?;
+
+    // Mark pending — blocks further sends until confirmed or cleared.
+    *st.has_pending_tx.lock().unwrap() = true;
+    let pending = serde_json::json!({
+        "addition_record_hexes": outcome.addition_record_hexes,
+        "timestamp": session::epoch_secs(),
+        "txid": outcome.txid,
+        "recipient": recipient_address.trim(),
+        "amount": outcome.amount,
+        "fee": outcome.fee,
+        "tip_height": outcome.tip_height,
+        "input_aocl_indices": outcome.input_aocl_indices,
+        "input_index_sets": outcome.input_index_sets,
+    });
+    if let Some(path) = pending_file(&app) {
+        let bytes = serde_json::to_vec_pretty(&pending).unwrap_or_default();
+        if let Err(e) = seed::write_file_atomic(&path, &bytes) {
+            // The transaction is already submitted; do not report failure.
+            debug_log!("[SEND] Could not persist pending state: {e}");
+            let _ = e;
+        }
     }
 
     let result = serde_json::json!({
         "success": true,
-        "addition_record_hexes": addition_jsons,
+        "txid": outcome.txid,
+        "amount": outcome.amount,
+        "fee": outcome.fee,
+        "outputs": outcome.outputs,
+        "attempts": outcome.attempts,
+        "addition_record_hexes": outcome.addition_record_hexes,
     });
-    Ok(serde_json::to_string(&result).unwrap_or_else(|_| "Transaction sent!".to_string()))
+    Ok(result.to_string())
 }
 
 /// Save outgoing transaction history to app data directory.
 /// This survives localStorage clear (unlike zustand persist).
 #[tauri::command]
 fn save_outgoing_history(app: tauri::AppHandle, history_json: String) -> Result<(), String> {
-    let dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| format!("App data dir: {}", e))?;
-    std::fs::create_dir_all(&dir).map_err(|e| format!("Create dir: {}", e))?;
-    let path = dir.join("outgoing_history.json");
-    std::fs::write(&path, &history_json).map_err(|e| format!("Write history: {}", e))
+    // Refuse anything that is not a JSON array, so a bug can't corrupt it.
+    let parsed: serde_json::Value =
+        serde_json::from_str(&history_json).map_err(|e| format!("Invalid history: {e}"))?;
+    if !parsed.is_array() {
+        return Err("Invalid history: expected a list".to_string());
+    }
+    let dir = app_dir(&app)?;
+    seed::write_file_atomic(&dir.join("outgoing_history.json"), history_json.as_bytes())
 }
 
 /// Load outgoing transaction history from app data directory.
 #[tauri::command]
 fn load_outgoing_history(app: tauri::AppHandle) -> Result<String, String> {
-    let dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| format!("App data dir: {}", e))?;
-    let path = dir.join("outgoing_history.json");
+    let path = app_dir(&app)?.join("outgoing_history.json");
     if path.exists() {
         std::fs::read_to_string(&path).map_err(|e| format!("Read history: {}", e))
     } else {
@@ -886,80 +580,58 @@ fn load_outgoing_history(app: tauri::AppHandle) -> Result<String, String> {
 }
 
 /// Check if a transaction's outputs were mined.
-/// Takes addition record hex strings, returns block heights if mined.
+/// Takes addition record JSON strings, returns block heights if mined.
 #[tauri::command]
 async fn check_transaction_mined(
     app: tauri::AppHandle,
     addition_record_hexes: Vec<String>,
     state: State<'_, AppState>,
 ) -> Result<Vec<u64>, String> {
-    check_session(&state)?;
-    let rpc = get_rpc(&state)?;
+    active_session(state.inner())?;
+    let rpc = get_rpc(state.inner())?;
 
     // Deserialize RpcAdditionRecords from JSON strings stored at send-time
     let mut addition_records = Vec::new();
     for json_str in &addition_record_hexes {
         let ar: RpcAdditionRecord = serde_json::from_str(json_str)
-            .map_err(|e| format!("Deserialize RpcAdditionRecord: {} from '{}'", e, json_str))?;
+            .map_err(|e| format!("Unreadable transaction record: {}", e))?;
         addition_records.push(ar);
     }
-    debug_log!(
-        "[CHECK_MINED] Checking {} addition records",
-        addition_records.len()
-    );
+    if addition_records.is_empty() {
+        return Ok(vec![]);
+    }
 
     let resp = rpc
         .was_mined(vec![], addition_records) // we're checking outputs, not inputs
         .await
         .map_err(|e| format!("was_mined: {}", e))?;
     let heights: Vec<u64> = resp.block_heights.into_iter().map(u64::from).collect();
-    debug_log!("[CHECK_MINED] Block heights: {:?}", heights);
 
-    // Auto-clear pending flag when transaction is confirmed (memory + disk)
+    // Auto-clear pending flag when the transaction is confirmed (memory + disk)
     if !heights.is_empty() {
         *state.has_pending_tx.lock().unwrap() = false;
-        if let Ok(dir) = app.path().app_data_dir() {
-            let _ = std::fs::remove_file(dir.join("pending_tx.json"));
+        if let Some(path) = pending_file(&app) {
+            let _ = std::fs::remove_file(path);
         }
-        debug_log!("[CHECK_MINED] Transaction confirmed — pending flag cleared (memory + disk)");
     }
 
     Ok(heights)
 }
 
 /// Check whether a pending transaction is blocking sends.
-/// Checks in-memory flag first, then falls back to disk (handles app restart).
 #[tauri::command]
 fn has_pending_tx(app: tauri::AppHandle, state: State<'_, AppState>) -> bool {
-    let in_memory = *state.has_pending_tx.lock().unwrap();
-    if in_memory {
-        return true;
-    }
-    // Check disk — pending_tx.json survives restart
-    if let Ok(dir) = app.path().app_data_dir() {
-        let path = dir.join("pending_tx.json");
-        if path.exists() {
-            // Restore in-memory flag from disk
-            *state.has_pending_tx.lock().unwrap() = true;
-            debug_log!("[PENDING] Restored pending flag from disk");
-            return true;
-        }
-    }
-    false
+    pending_exists(&app, state.inner())
 }
 
-/// Load pending tx addition records from disk (for auto-resolve during sync).
+/// Load pending tx data from disk (for auto-resolve during sync).
 #[tauri::command]
 fn load_pending_tx(app: tauri::AppHandle) -> Result<String, String> {
-    let dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| format!("App data dir: {}", e))?;
-    let path = dir.join("pending_tx.json");
-    if path.exists() {
-        std::fs::read_to_string(&path).map_err(|e| format!("Read pending_tx: {}", e))
-    } else {
-        Ok("{}".to_string())
+    match pending_file(&app) {
+        Some(path) if path.exists() => {
+            std::fs::read_to_string(&path).map_err(|e| format!("Read pending_tx: {}", e))
+        }
+        _ => Ok("{}".to_string()),
     }
 }
 
@@ -968,16 +640,13 @@ fn load_pending_tx(app: tauri::AppHandle) -> Result<String, String> {
 #[tauri::command]
 fn clear_pending_tx(app: tauri::AppHandle, state: State<'_, AppState>) {
     *state.has_pending_tx.lock().unwrap() = false;
-    // Remove from disk too
-    if let Ok(dir) = app.path().app_data_dir() {
-        let _ = std::fs::remove_file(dir.join("pending_tx.json"));
+    if let Some(path) = pending_file(&app) {
+        let _ = std::fs::remove_file(path);
     }
-    debug_log!("[PENDING] Pending flag cleared (memory + disk)");
 }
 
-/// Scan the blockchain for UTXOs belonging to this wallet.
-/// Uses Thorkil's privacy-preserving approach:
-/// AnnouncementFlag → blockHeightsByFlags → decrypt locally.
+/// Scan the blockchain for UTXOs belonging to this wallet (incremental;
+/// see `sync.rs`).
 #[tauri::command]
 async fn sync_wallet(
     app: tauri::AppHandle,
@@ -985,15 +654,15 @@ async fn sync_wallet(
     scan_window: Option<sync::ScanWindow>,
     state: State<'_, AppState>,
 ) -> Result<sync::SyncResult, String> {
-    check_session(&state)?;
-    touch_session(&state);
-    let rpc = get_rpc(&state)?;
-    let actual_pin = pin.unwrap_or_else(|| get_cached_pin(&state).unwrap_or_default());
-    if actual_pin.is_empty() {
-        return Err("PIN required".to_string());
-    }
-    let entropy = get_wallet_entropy(&app, &actual_pin)?;
-    sync::scan_for_utxos(&rpc, &entropy, scan_window.unwrap_or_default()).await
+    let _ = pin; // the session holds the keys
+    let (entropy, keys) = active_session(state.inner())?;
+    touch_session(state.inner());
+    let rpc = get_rpc(state.inner())?;
+    let network = *state.network.lock().unwrap();
+    let dir = app_dir(&app)?;
+    let _scan_guard = state.scan_lock.lock().await;
+    let outcome = sync::scan_for_utxos(&rpc, &entropy, &keys, network, scan_window, &dir).await?;
+    Ok(outcome.to_result(Timestamp::now()))
 }
 
 // ── Supporter Connection Commands ────────────────────────────
@@ -1004,11 +673,18 @@ async fn connect_node(
     auth_token: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<ConnectionInfo, String> {
-    let client = RpcClient::new(&url, auth_token);
-    let (network, block_height) = client.test_connection().await?;
+    let _ = auth_token; // the supporter API is public
+    let client = RpcClient::new(&url)?;
+    let (network_name, block_height) = client.test_connection().await?;
+    let network = keys::parse_network(&network_name)?;
+    debug_log!(
+        "[NODE] Connected to {} ({network}) at {block_height}",
+        client.url()
+    );
     *state.rpc.lock().unwrap() = Some(client);
+    *state.network.lock().unwrap() = network;
     Ok(ConnectionInfo {
-        network,
+        network: network_name,
         block_height,
     })
 }
@@ -1019,16 +695,7 @@ async fn disconnect_node(state: State<'_, AppState>) -> Result<(), String> {
     Ok(())
 }
 
-fn get_cached_pin(state: &State<'_, AppState>) -> Result<String, String> {
-    state
-        .cached_pin
-        .lock()
-        .unwrap()
-        .clone()
-        .ok_or_else(|| "Session expired — please unlock again".to_string())
-}
-
-fn get_rpc(state: &State<'_, AppState>) -> Result<RpcClient, String> {
+fn get_rpc(state: &AppState) -> Result<RpcClient, String> {
     state
         .rpc
         .lock()
@@ -1039,15 +706,15 @@ fn get_rpc(state: &State<'_, AppState>) -> Result<RpcClient, String> {
 
 // ── Query Commands ───────────────────────────────────────────
 // The `personal_*` RPC namespace (balance, sendToAddress, history, ...) is
-// deliberately NOT exposed. That namespace requires the supporter node to
-// run a wallet on behalf of the caller — the wallet's seed would live on
-// the supporter. Our wallet is privacy-preserving: we derive keys and build
-// transactions locally, and only use the `node`, `chain`, `wallet`,
-// `archival`, and `utxoindex` namespaces on the supporter.
+// deliberately NOT used. That namespace requires the supporter node to run a
+// wallet on behalf of the caller — the wallet's seed would live on the
+// supporter. This wallet derives keys and builds transactions locally, and
+// only uses the `node`, `chain`, `wallet`, `archival` and `utxoindex`
+// namespaces on the supporter.
 
 #[tauri::command]
 async fn get_block_height(state: State<'_, AppState>) -> Result<u64, String> {
-    let resp = get_rpc(&state)?
+    let resp = get_rpc(state.inner())?
         .height()
         .await
         .map_err(|e| format!("height: {}", e))?;
@@ -1071,13 +738,13 @@ pub fn run() {
         })
         .manage(AppState {
             rpc: Mutex::new(None),
-            wallet_unlocked: Mutex::new(false),
-            cached_pin: Mutex::new(None),
-            last_activity: Mutex::new(None),
-            failed_pin_attempts: Mutex::new(0),
-            lockout_until: Mutex::new(None),
+            network: Mutex::new(Network::Main),
+            session: Mutex::new(None),
             has_pending_tx: Mutex::new(false),
-            work_in_progress: Mutex::new(false),
+            work_in_progress: AtomicUsize::new(0),
+            send_lock: tokio::sync::Mutex::new(()),
+            scan_lock: tokio::sync::Mutex::new(()),
+            limiter_lock: Mutex::new(()),
         })
         .invoke_handler(tauri::generate_handler![
             // Wallet
@@ -1093,6 +760,7 @@ pub fn run() {
             // Local key derivation
             generate_local_address,
             generate_main_addresses,
+            validate_address,
             // UTXO scanning + sending
             sync_wallet,
             send_transaction,

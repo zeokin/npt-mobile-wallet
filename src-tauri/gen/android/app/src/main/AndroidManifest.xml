@@ -2,7 +2,12 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.INTERNET" />
 
+    <!-- Wallet data (encrypted seed, transaction history, scan cache) must not
+         leave the device through cloud backup or device-to-device transfer.
+         A new phone is set up by restoring from the seed phrase. -->
     <application
+        android:allowBackup="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
         android:theme="@style/Theme.npt_mobile_wallet"

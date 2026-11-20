@@ -12,14 +12,39 @@ All private keys are derived and stored locally on the device. Transactions are 
   - `api/rpc.ts` — Tauri invoke wrappers
   - `hooks/` — React hooks (session guard)
   - `components/ui/` — shared UI components (NavBar, logo, …)
-- `src-tauri/` — Rust backend
-  - `src/lib.rs` — Tauri commands, app state, session logic
-  - `src/seed.rs` — BIP39 mnemonic + AES-256-GCM + Argon2id KDF
-  - `src/keys.rs` — local key derivation
-  - `src/sync.rs` — privacy-preserving UTXO scan (flag-based + local decryption)
+- `src-tauri/` — Rust backend (neptune-core crates 0.20.x, Triton VM 9)
+  - `src/lib.rs` — Tauri commands and app state
+  - `src/session.rs` — unlocked-wallet session, auto-lock clock, password-attempt limiter
+  - `src/seed.rs` — BIP39 mnemonic + AES-256-GCM + Argon2id KDF, atomic seed file writes
+  - `src/keys.rs` — local key derivation, per-session key cache, address validation
+  - `src/sync.rs` — privacy-preserving UTXO scan (flag-based + local decryption, block cache)
+  - `src/send.rs` — send pipeline (input selection, membership proofs, retries, submission)
+  - `src/transaction.rs` — ProofCollection proving for sends
   - `src/rpc.rs` — JSON-RPC client for supporter node
-  - `src/transaction.rs` — STARK proof generation for sends
   - `gen/android/` — generated Android project (gradle, manifest, Kotlin shims)
+
+## How it works
+
+**Sync.** The wallet derives its keys locally and asks the supporter's UTXO
+index for the blocks that carry announcements for those keys
+(`utxoindex_blockHeightsByFlags`). Each such block is downloaded once and its
+public parts are cached on the device, so later syncs only fetch new blocks.
+Announcements are decrypted locally; a UTXO counts only if it is locked to one
+of the wallet's keys and is really an output of its block. One batched call
+(`archival_batchAreBloomIndicesSet`) tells which UTXOs are spent. Every key
+type (generation, EC-hybrid, viewing, symmetric/change) is scanned over a
+look-ahead window that widens automatically when funds are found near its end,
+so seeds used in neptune-core or the desktop wallet show their full balance.
+Time-locked funds are shown as locked rather than hidden. Any RPC failure fails
+the sync instead of silently showing a wrong balance.
+
+**Send.** Inputs are selected largest-first (at most 10). Lustration of old
+inputs is decided from the tip header before anything about the inputs is sent
+to the node. Membership proofs and the tip header are taken from the same block,
+the transaction is validated locally, then a `ProofCollection` is proven for the
+tip's consensus rule set. If the node answers that the transaction is no longer
+confirmable (new blocks arrived during proving), it is rebuilt and proven again,
+up to three times. Progress is emitted to the UI as `send_state` events.
 
 ## Run in development mode on a Debian/Ubuntu system
 
@@ -140,7 +165,16 @@ protect against passive eavesdroppers on the network path.
 
 All private key material is encrypted with AES-256-GCM; the key is derived
 from the user's password via Argon2id (64 MB memory, 3 iterations). The seed
-file lives in the app's sandboxed data directory.
+file lives in the app's sandboxed data directory and is written atomically.
+
+While unlocked, the decrypted wallet entropy and derived keys stay in the Rust
+process (wiped when the wallet locks); the password is not kept and is asked
+for again to send or to reveal the seed phrase. Wrong passwords are limited
+(five attempts, then an escalating cooldown that survives app restarts). The
+wallet locks after three minutes without activity, measured on a clock that
+keeps running while the phone sleeps. Spending secrets of UTXOs never reach the
+WebView. Android cloud backup and device-to-device transfer of app data are
+disabled; restore a wallet on a new phone from its seed phrase.
 
 See the source of [`src-tauri/src/seed.rs`](src-tauri/src/seed.rs) for the
 encryption details.
