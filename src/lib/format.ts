@@ -47,12 +47,25 @@ export function formatDateTime(ms: number): string {
   return `${formatDate(ms)} ${d.toLocaleTimeString(localeTag(), { hour: "2-digit", minute: "2-digit" })}`;
 }
 
-/** mm:ss for elapsed timers. */
+/** mm:ss for elapsed timers (h:mm:ss from one hour on). */
 export function formatElapsed(ms: number): string {
   const total = Math.max(0, Math.floor(ms / 1000));
-  const m = Math.floor(total / 60);
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
   const s = total % 60;
-  return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+  const mmss = `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+  return h > 0 ? `${h}:${mmss}` : mmss;
+}
+
+/** Compact age for small labels: "5 min", "3 h", "2 d", or a short date. */
+export function shortAge(ms: number, now = Date.now()): string {
+  const minutes = Math.max(1, Math.round((now - ms) / 60_000));
+  if (minutes < 60) return t("time.shortMinutes", { n: minutes });
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return t("time.shortHours", { n: hours });
+  const days = Math.round(hours / 24);
+  if (days < 60) return t("time.shortDays", { n: days });
+  return new Date(ms).toLocaleDateString(localeTag(), { month: "short", day: "numeric" });
 }
 
 /** Thousands separators for block heights. */

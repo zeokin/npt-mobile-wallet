@@ -21,7 +21,8 @@ SAME_OK = {
     "addresses.title", "send.addressType", "history.receivedCount", "history.sentCount", "unlock.lockedFor",
     "overlay.to", "history.to", "history.fee", "settings.hidesIn", "errors.invalidAddressShort",
     "time.minutesAgo", "time.hoursAgo", "wallet.locked", "send.spendable", "tx.lockedUntil", "send.recipientPlaceholder",
-    "tx.status", "settings.node", "bubble.transaction", "send.total", "tx.date", "nav.wallet", "tx.block",
+    "tx.status", "settings.node", "send.total", "tx.date", "nav.wallet", "tx.block",
+    "timeline.transaction", "time.shortMinutes", "time.shortHours", "time.shortDays",
 }
 
 

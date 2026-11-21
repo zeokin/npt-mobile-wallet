@@ -16,7 +16,8 @@ import NavBar from "../components/ui/NavBar";
 import QrModal from "../components/ui/QrModal";
 import AddressesSheet from "../components/AddressesSheet";
 import PendingTxSheet from "../components/PendingTxSheet";
-import StatusBubble from "../components/StatusBubble";
+import TxDetailSheet, { type HistoryItem } from "../components/TxDetailSheet";
+import TxTimeline from "../components/TxTimeline";
 
 // Receive address tabs. The type names are Neptune's and stay untranslated.
 const ADDR_TABS: { key: ReceiveKeyType; label: string; canRenew: boolean }[] = [
@@ -53,6 +54,7 @@ export default function WalletScreen() {
   const [qr, setQr] = useState<{ title: string; address: string } | null>(null);
   const [showAddresses, setShowAddresses] = useState(false);
   const [showPending, setShowPending] = useState(false);
+  const [detail, setDetail] = useState<HistoryItem | null>(null);
   const [pendingBlocked, setPendingBlocked] = useState(false);
   const [creating, setCreating] = useState(false);
   const [now, setNow] = useState(Date.now());
@@ -88,7 +90,6 @@ export default function WalletScreen() {
               : t("wallet.receivedMany", { n: outcome.newlyReceived })
           );
         }
-        if (outcome.pending === "confirmed") toast.success(t("wallet.confirmed"));
         if (outcome.pending === "dropped") toast(t("wallet.dropped"));
       } catch (e) {
         if (opts.showErrors) toast.error(errorText(e));
@@ -112,9 +113,11 @@ export default function WalletScreen() {
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // A send that just finished makes the pending flag appear.
+  // A send that just finished makes the pending flag appear. Its result
+  // sheet belongs to the Send screen: once back here it is not needed.
   useEffect(() => {
     refreshPendingFlag();
+    if (sendPhase === "done") useSendStore.getState().reset();
   }, [sendPhase, refreshPendingFlag]);
 
   // Follow the chain: poll the height and sync when a new block arrives.
@@ -201,18 +204,19 @@ export default function WalletScreen() {
           </button>
         </div>
 
-        {/* Decorative chart with the sending / pending bubble */}
-        <div className="relative flex-1 min-h-[96px] overflow-hidden">
-          <img
-            src="/wave-chart.svg"
-            alt=""
-            className="absolute left-1/2 -translate-x-1/2 bottom-0 min-w-full h-full max-h-[225px] object-cover object-bottom"
-          />
-          <StatusBubble
+        {/* Timeline: the payment on its way, or the latest payments */}
+        <div className="relative flex-1 min-h-0 flex flex-col overflow-hidden">
+          <TxTimeline
             pendingTx={pendingTx}
             pendingBlocked={pendingBlocked}
             onOpenSending={() => navigate("/send")}
             onOpenPending={() => setShowPending(true)}
+            onOpenConfirmed={(tx) => setDetail({ kind: "out", tx })}
+            onOpenHistory={() => navigate("/history")}
+            onOpenReceive={() =>
+              current &&
+              setQr({ title: t("wallet.receiveTitle", { type: tab.label, index: current.index }), address: current.address })
+            }
           />
         </div>
 
@@ -278,7 +282,7 @@ export default function WalletScreen() {
         <div className="flex w-full justify-center">
           <button
             onClick={() => navigate("/send")}
-            disabled={(pendingBlocked && sendPhase === "idle") || syncing}
+            disabled={pendingBlocked || sendPhase === "sending" || syncing}
             className="flex w-1/2 items-center justify-center gap-3 bg-[var(--npt-blue)] rounded-full py-1.5 disabled:opacity-60 active:opacity-90 transition-opacity"
           >
             <div className="w-5 h-5 rounded-full border-2 border-white border-dotted flex items-center">
@@ -318,6 +322,7 @@ export default function WalletScreen() {
         }
         onChanged={() => refreshAddresses()}
       />
+      <TxDetailSheet item={detail} onClose={() => setDetail(null)} />
       <PendingTxSheet
         open={showPending}
         tx={pendingTx}

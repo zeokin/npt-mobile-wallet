@@ -57,7 +57,7 @@ export async function resolvePendingTx(): Promise<PendingResolution> {
     // The backend clears its pending flag when the outputs are mined.
     const heights = await checkTransactionMined(records);
     if (heights.length > 0) {
-      markPending(file, { status: "confirmed", confirmed_height: heights[0] });
+      markPending(file, { status: "confirmed", confirmed_height: heights[0], confirmed_at: Date.now() });
       return "confirmed";
     }
   }

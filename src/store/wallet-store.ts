@@ -20,6 +20,9 @@ export interface OutgoingTx {
   addition_record_hexes: string[];
   /// Block height where confirmed (if known)
   confirmed_height?: number;
+  /// When this app saw the confirmation, ms since epoch (the wallet shows
+  /// "Confirmed" for a short while after it).
+  confirmed_at?: number;
   txid?: string;
   outputs?: TxOutputInfo[];
 }
