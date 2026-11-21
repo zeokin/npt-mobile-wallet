@@ -1,12 +1,15 @@
 // Small display helpers shared by the screens.
 
+import { localeTag, t } from "../i18n";
+
 /** `nechm1qx…k3d9` style shortening for long addresses and ids. */
 export function shortAddress(text: string, head = 12, tail = 8): string {
   if (!text) return "";
   return text.length > head + tail + 1 ? `${text.slice(0, head)}…${text.slice(-tail)}` : text;
 }
 
-/** Human label of a key type as stored on UTXOs. */
+/** Label of a key type as stored on UTXOs. The address type names are
+ *  Neptune's technical names and stay untranslated. */
 export function keyTypeLabel(keyType: string | null | undefined): string {
   switch (keyType) {
     case "generation":
@@ -16,7 +19,7 @@ export function keyTypeLabel(keyType: string | null | undefined): string {
     case "viewing_address":
       return "Viewing";
     case "symmetric":
-      return "Change";
+      return t("format.change");
     default:
       return keyType ?? "";
   }
@@ -25,23 +28,23 @@ export function keyTypeLabel(keyType: string | null | undefined): string {
 /** "just now", "5 min ago", "3 h ago", "2 days ago", or a date. */
 export function timeAgo(ms: number, now = Date.now()): string {
   const seconds = Math.max(0, Math.floor((now - ms) / 1000));
-  if (seconds < 45) return "just now";
+  if (seconds < 45) return t("time.justNow");
   const minutes = Math.round(seconds / 60);
-  if (minutes < 60) return `${minutes} min ago`;
+  if (minutes < 60) return t("time.minutesAgo", { n: minutes });
   const hours = Math.round(minutes / 60);
-  if (hours < 24) return `${hours} h ago`;
+  if (hours < 24) return t("time.hoursAgo", { n: hours });
   const days = Math.round(hours / 24);
-  if (days < 7) return `${days} day${days === 1 ? "" : "s"} ago`;
+  if (days < 7) return days === 1 ? t("time.dayAgo") : t("time.daysAgo", { n: days });
   return formatDate(ms);
 }
 
 export function formatDate(ms: number): string {
-  return new Date(ms).toLocaleDateString([], { year: "numeric", month: "short", day: "numeric" });
+  return new Date(ms).toLocaleDateString(localeTag(), { year: "numeric", month: "short", day: "numeric" });
 }
 
 export function formatDateTime(ms: number): string {
   const d = new Date(ms);
-  return `${formatDate(ms)} ${d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
+  return `${formatDate(ms)} ${d.toLocaleTimeString(localeTag(), { hour: "2-digit", minute: "2-digit" })}`;
 }
 
 /** mm:ss for elapsed timers. */

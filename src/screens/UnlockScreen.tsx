@@ -5,10 +5,14 @@ import { Eye, EyeOff } from "lucide-react";
 import { unlockWallet, deleteWallet, hasPendingTx } from "../api/rpc";
 import { connectToNode } from "../lib/node";
 import { refreshAddresses } from "../lib/sync";
+import { errorText } from "../lib/errors";
+import { useT } from "../i18n";
 import NeptuneLogo from "../components/ui/NeptuneLogo";
+import { LanguageButton } from "../components/LanguageSheet";
 
 export default function UnlockScreen() {
   const navigate = useNavigate();
+  const t = useT();
   const [pin, setPin] = useState("");
   const [showPin, setShowPin] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -52,7 +56,7 @@ export default function UnlockScreen() {
   const handleUnlock = async () => {
     if (locked) return;
     if (!pin) {
-      toast.error("Enter your password");
+      toast.error(t("unlock.enterPassword"));
       return;
     }
     setLoading(true);
@@ -74,8 +78,8 @@ export default function UnlockScreen() {
       navigate("/wallet", { replace: true, state: { freshUnlock: true } });
     } catch (e) {
       const msg = String(e);
-      setErrorMsg(msg);
-      toast.error(msg);
+      setErrorMsg(errorText(msg));
+      toast.error(errorText(msg));
       setPin("");
 
       // Detect lockout from backend response:
@@ -113,10 +117,13 @@ export default function UnlockScreen() {
 
   return (
     <div className="flex flex-col h-full bg-[var(--npt-blue)] safe-top safe-bottom">
+      <div className="flex justify-end px-3 pt-2">
+        <LanguageButton />
+      </div>
       {/* Centered content */}
       <div className="h-5/6 flex-1 flex flex-col items-center justify-center gap-2">
         <NeptuneLogo size={90} />
-        <p className="text-2xl text-white/60 font-light">Welcome back</p>
+        <p className="text-2xl text-white/60 font-light">{t("unlock.welcomeBack")}</p>
 
         {/* Password input */}
         <div className="w-full mt-2 px-6">
@@ -124,7 +131,7 @@ export default function UnlockScreen() {
             <input
               type={showPin ? "text" : "password"}
               autoComplete="off"
-              placeholder={locked ? "" : "Enter your password"}
+              placeholder={locked ? "" : t("unlock.enterPassword")}
               value={pin}
               onChange={(e) => !locked && setPin(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && handleUnlock()}
@@ -134,13 +141,14 @@ export default function UnlockScreen() {
             <button
               onClick={() => setShowPin(!showPin)}
               className="p-2 text-white/50 hover:text-white/80 transition-colors"
+              aria-label={t("common.showPassword")}
             >
               {showPin ? <EyeOff size={20} /> : <Eye size={20} />}
             </button>
           </div>
           {locked ? (
             <p className="text-center text-sm text-red-200 mt-2">
-              Too many attempts. Try again in {displaySeconds}s
+              {t("unlock.tryAgainIn", { s: displaySeconds })}
             </p>
           ) : errorMsg ? (
             <p className="text-center text-sm text-red-200 mt-2">{errorMsg}</p>
@@ -155,15 +163,15 @@ export default function UnlockScreen() {
           disabled={loading || locked}
           className={`w-1/2 py-1 rounded-full bg-white text-[var(--npt-blue)] text-lg font-semibold active:opacity-90 transition-opacity ${locked ? "opacity-40" : ""}`}
         >
-          {loading ? "Connecting..." : locked ? `Locked (${displaySeconds}s)` : "Unlock Wallet"}
+          {loading ? t("unlock.connecting") : locked ? t("unlock.lockedFor", { s: displaySeconds }) : t("unlock.unlock")}
         </button></div>
         <p className="text-center text-sm text-white/70">
-          Don't have an account?{" "}
+          {t("unlock.noAccount")}{" "}
           <button
             onClick={handleSwitchRequest}
             className="font-bold text-white underline underline-offset-2"
           >
-            Create/Import
+            {t("unlock.createImport")}
           </button>
         </p>
       </div>
@@ -179,18 +187,16 @@ export default function UnlockScreen() {
             onClick={(e) => e.stopPropagation()}
           >
             <h3 className="text-lg font-semibold text-[var(--npt-text)] text-center">
-              Transaction pending
+              {t("unlock.pendingTitle")}
             </h3>
             <p className="text-xs text-[var(--npt-muted)] text-center leading-relaxed">
-              You have a transaction waiting to confirm. You can't create or import a
-              new wallet until it's resolved — unlock this wallet and sync to let it
-              confirm first.
+              {t("unlock.pendingText")}
             </p>
             <button
               onClick={() => setShowPendingWarning(false)}
               className="w-full py-2 rounded-full bg-[var(--npt-blue)] text-white font-semibold active:opacity-90"
             >
-              OK
+              {t("common.ok")}
             </button>
           </div>
         </div>
@@ -207,25 +213,23 @@ export default function UnlockScreen() {
             onClick={(e) => e.stopPropagation()}
           >
             <h3 className="text-lg font-semibold text-[var(--npt-text)] text-center">
-              Replace this wallet?
+              {t("unlock.replaceTitle")}
             </h3>
             <p className="text-xs text-[var(--npt-muted)] text-center leading-relaxed">
-              Creating or importing a new wallet removes the current one from this
-              device. Make sure you have its 18-word seed phrase backed up — without
-              it, its funds cannot be recovered.
+              {t("unlock.replaceText")}
             </p>
             <div className="flex gap-2 pt-1">
               <button
                 onClick={() => setShowSwitchConfirm(false)}
                 className="flex-1 py-2 rounded-full bg-[var(--npt-logo-bg)] text-[var(--npt-text)] font-medium active:opacity-80"
               >
-                Cancel
+                {t("common.cancel")}
               </button>
               <button
                 onClick={handleSwitchWallet}
                 className="flex-1 py-2 rounded-full bg-[var(--npt-error)] text-white font-semibold active:opacity-90"
               >
-                Continue
+                {t("common.continue")}
               </button>
             </div>
           </div>

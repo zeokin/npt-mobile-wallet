@@ -1,6 +1,8 @@
+import { useEffect } from "react";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { Toaster } from "sonner";
 import { useSessionGuard } from "./hooks/useSessionGuard";
+import { useLanguage } from "./i18n";
 import SeedSetupScreen from "./screens/SeedSetupScreen";
 import SeedCreateScreen from "./screens/SeedCreateScreen";
 import SeedImportScreen from "./screens/SeedImportScreen";
@@ -12,6 +14,10 @@ import SettingsScreen from "./screens/SettingsScreen";
 
 function AppRoutes() {
   useSessionGuard();
+  const lang = useLanguage();
+  useEffect(() => {
+    document.documentElement.lang = lang;
+  }, [lang]);
 
   return (
     <Routes>

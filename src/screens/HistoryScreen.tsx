@@ -7,6 +7,8 @@ import { formatDate, formatDateTime, formatHeight, shortAddress } from "../lib/f
 import { resolvePendingTx } from "../lib/pending";
 import { syncNow } from "../lib/sync";
 import { usePullToRefresh } from "../hooks/usePullToRefresh";
+import { errorText } from "../lib/errors";
+import { useT } from "../i18n";
 import NavBar from "../components/ui/NavBar";
 import TxDetailSheet, { type HistoryItem } from "../components/TxDetailSheet";
 
@@ -30,10 +32,11 @@ function Chip({ tone, children }: { tone: "pending" | "error" | "muted" | "blue"
     blue: "bg-[var(--npt-blue)]/10 text-[var(--npt-blue)]",
     locked: "bg-[var(--npt-warning)]/15 text-[var(--npt-warning)]",
   }[tone];
-  return <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold whitespace-nowrap ${styles}`}>{children}</span>;
+  return <span className={`min-w-0 truncate px-2 py-0.5 rounded-full text-[10px] font-semibold ${styles}`}>{children}</span>;
 }
 
 export default function HistoryScreen() {
+  const t = useT();
   const [filter, setFilter] = useState<Filter>("all");
   const [selected, setSelected] = useState<HistoryItem | null>(null);
   const { utxos, lockedUtxos, outgoingTxs, lastSyncHeight, lastSyncAt, syncStatus } = useWalletStore();
@@ -47,7 +50,7 @@ export default function HistoryScreen() {
     try {
       await syncNow();
     } catch (e) {
-      toast.error(String(e));
+      toast.error(errorText(e));
     }
   };
   const { ref, pull, refreshing, ready } = usePullToRefresh(refresh);
@@ -85,12 +88,12 @@ export default function HistoryScreen() {
       {/* Header */}
       <div className="flex items-center justify-between px-2 py-2">
         <div className="w-8" />
-        <h1 className="text-lg font-bold text-[var(--npt-text)]">History</h1>
+        <h1 className="text-lg font-bold text-[var(--npt-text)]">{t("history.title")}</h1>
         <div className="w-8 flex justify-end">
           {syncStatus === "syncing" ? (
             <Loader2 size={18} className="text-[var(--npt-blue)] animate-spin" />
           ) : (
-            <button onClick={refresh} className="text-[var(--npt-blue)] active:opacity-70" aria-label="Refresh">
+            <button onClick={refresh} className="text-[var(--npt-blue)] active:opacity-70" aria-label={t("history.refresh")}>
               <RefreshCw size={18} />
             </button>
           )}
@@ -101,9 +104,9 @@ export default function HistoryScreen() {
       <div className="flex mx-5 mt-1 border-b border-[var(--npt-border)]">
         {(
           [
-            ["all", "All"],
-            ["in", `Received (${receivedCount})`],
-            ["out", `Sent (${outgoingTxs.length})`],
+            ["all", t("history.all")],
+            ["in", t("history.receivedCount", { n: receivedCount })],
+            ["out", t("history.sentCount", { n: outgoingTxs.length })],
           ] as [Filter, string][]
         ).map(([key, label]) => (
           <button
@@ -130,9 +133,9 @@ export default function HistoryScreen() {
             (refreshing ? (
               <Loader2 size={18} className="text-[var(--npt-blue)] animate-spin" />
             ) : ready ? (
-              "Release to refresh"
+              t("history.release")
             ) : (
-              "Pull to refresh"
+              t("history.pull")
             ))}
         </div>
 
@@ -140,9 +143,9 @@ export default function HistoryScreen() {
           {rows.length === 0 && (
             <div className="text-center mt-12 space-y-2">
               <p className="text-sm text-[var(--npt-muted)]">
-                {filter === "out" ? "No sent transactions yet." : "No transactions yet."}
+                {filter === "out" ? t("history.noSent") : t("history.empty")}
               </p>
-              <p className="text-xs text-[var(--npt-muted)]">Pull down to sync your wallet.</p>
+              <p className="text-xs text-[var(--npt-muted)]">{t("history.pullHint")}</p>
             </div>
           )}
 
@@ -171,14 +174,16 @@ export default function HistoryScreen() {
                   )}
                 </div>
                 <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-sm font-medium text-[var(--npt-text)]">Received</span>
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <span className="shrink-0 text-sm font-medium text-[var(--npt-text)]">{t("tx.received")}</span>
                     {item.utxo.locked && (
                       <Chip tone="locked">
-                        Locked{item.utxo.release_date ? ` until ${formatDate(item.utxo.release_date)}` : ""}
+                        {item.utxo.release_date
+                          ? t("tx.lockedUntil", { date: formatDate(item.utxo.release_date) })
+                          : t("tx.locked")}
                       </Chip>
                     )}
-                    {item.utxo.likely_spent && <Chip tone="muted">Spent</Chip>}
+                    {item.utxo.likely_spent && <Chip tone="muted">{t("tx.spent")}</Chip>}
                   </div>
                   <span className="text-xs text-[var(--npt-muted)]">
                     {item.utxo.block_time ? `${formatDateTime(item.utxo.block_time)} · ` : ""}#
@@ -215,23 +220,23 @@ export default function HistoryScreen() {
                   )}
                 </div>
                 <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-sm font-medium text-[var(--npt-text)]">Sent</span>
-                    {item.tx.status === "pending" && <Chip tone="pending">Pending</Chip>}
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <span className="shrink-0 text-sm font-medium text-[var(--npt-text)]">{t("tx.sent")}</span>
+                    {item.tx.status === "pending" && <Chip tone="pending">{t("history.pending")}</Chip>}
                     {item.tx.status === "confirmed" && item.tx.confirmed_height && (
                       <Chip tone="blue">#{formatHeight(item.tx.confirmed_height)}</Chip>
                     )}
-                    {item.tx.status === "dropped" && <Chip tone="muted">Not confirmed</Chip>}
+                    {item.tx.status === "dropped" && <Chip tone="muted">{t("history.notConfirmed")}</Chip>}
                   </div>
                   <span className="text-xs text-[var(--npt-muted)] truncate block">
-                    {formatDateTime(item.tx.timestamp)} · to {shortAddress(item.tx.recipient, 8, 4)}
+                    {formatDateTime(item.tx.timestamp)} · {t("history.to", { address: shortAddress(item.tx.recipient, 8, 4) })}
                   </span>
                 </div>
                 <div className="text-right shrink-0">
                   <span className="text-sm font-semibold text-[var(--npt-error)]">
                     −{formatAmountText(item.tx.amount, 4)}
                   </span>
-                  <p className="text-[10px] text-[var(--npt-muted)]">fee {formatAmountText(item.tx.fee, 4)}</p>
+                  <p className="text-[10px] text-[var(--npt-muted)]">{t("history.fee", { amount: formatAmountText(item.tx.fee, 4) })}</p>
                 </div>
               </button>
             )

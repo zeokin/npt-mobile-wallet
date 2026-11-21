@@ -1,3 +1,5 @@
+import { t } from "../i18n";
+
 /// Password strength for the meter under new-password fields.
 export function getPasswordStrength(pw: string): { label: string; color: string; width: string } {
   if (pw.length === 0) return { label: "", color: "", width: "0%" };
@@ -8,10 +10,10 @@ export function getPasswordStrength(pw: string): { label: string; color: string;
   if (/\d/.test(pw)) score++;
   if (/[^a-zA-Z0-9]/.test(pw)) score++;
 
-  if (score <= 1) return { label: "Weak", color: "var(--npt-error)", width: "25%" };
-  if (score <= 2) return { label: "Fair", color: "var(--npt-warning)", width: "50%" };
-  if (score <= 3) return { label: "Good", color: "var(--npt-blue)", width: "75%" };
-  return { label: "Strong", color: "var(--npt-success)", width: "100%" };
+  if (score <= 1) return { label: t("password.weak"), color: "var(--npt-error)", width: "25%" };
+  if (score <= 2) return { label: t("password.fair"), color: "var(--npt-warning)", width: "50%" };
+  if (score <= 3) return { label: t("password.good"), color: "var(--npt-blue)", width: "75%" };
+  return { label: t("password.strong"), color: "var(--npt-success)", width: "100%" };
 }
 
 export const MIN_PASSWORD_LENGTH = 8;

@@ -8,6 +8,8 @@ import { connectToNode } from "../lib/node";
 import { pasteText } from "../lib/clipboard";
 import { getPasswordStrength, MIN_PASSWORD_LENGTH } from "../lib/password";
 import { refreshAddresses } from "../lib/sync";
+import { errorText } from "../lib/errors";
+import { useT } from "../i18n";
 import { useSecureScreen } from "../hooks/useSecureScreen";
 import NeptuneLogo from "../components/ui/NeptuneLogo";
 import NeptuneText from "../components/ui/NeptuneText";
@@ -20,6 +22,7 @@ function splitWords(text: string): string[] {
 
 export default function SeedImportScreen() {
   const navigate = useNavigate();
+  const t = useT();
   const [step, setStep] = useState<"words" | "password">("words");
   const [wordInputs, setWordInputs] = useState<string[]>(Array(WORD_COUNT).fill(""));
   const [check, setCheck] = useState<SeedWordsCheck | null>(null);
@@ -97,11 +100,11 @@ export default function SeedImportScreen() {
     const words = text ? splitWords(text) : [];
     if (words.length === WORD_COUNT) {
       fillFrom(0, words);
-      toast.success("18 words pasted");
+      toast.success(t("import.pasted"));
     } else if (words.length === 0) {
-      toast.error("The clipboard is empty");
+      toast.error(t("common.clipboardEmpty"));
     } else {
-      toast.error(`The clipboard has ${words.length} words; a seed phrase has 18.`);
+      toast.error(t("import.wrongCount", { n: words.length }));
     }
   };
 
@@ -129,9 +132,9 @@ export default function SeedImportScreen() {
   const handleWordsNext = () => {
     if (!wordsReady) {
       const empty = wordInputs.findIndex((w) => !w.trim());
-      if (empty !== -1) toast.error(`Word #${empty + 1} is empty`);
-      else if (invalid.size > 0) toast.error("Some words are not in the seed word list");
-      else toast.error(check?.error ?? "Check the words");
+      if (empty !== -1) toast.error(t("import.wordEmpty", { n: empty + 1 }));
+      else if (invalid.size > 0) toast.error(t("import.notInList"));
+      else toast.error(check?.error ? errorText(check.error) : t("import.checkWords"));
       return;
     }
     setStep("password");
@@ -139,11 +142,11 @@ export default function SeedImportScreen() {
 
   const handleImport = async () => {
     if (pin.length < MIN_PASSWORD_LENGTH) {
-      toast.error(`Password must be at least ${MIN_PASSWORD_LENGTH} characters`);
+      toast.error(t("create.tooShort", { n: MIN_PASSWORD_LENGTH }));
       return;
     }
     if (pin !== confirmPin) {
-      toast.error("Passwords do not match");
+      toast.error(t("create.mismatch"));
       setConfirmPin("");
       return;
     }
@@ -163,11 +166,11 @@ export default function SeedImportScreen() {
         /* WalletScreen reconnects on sync */
       }
       await refreshAddresses();
-      toast.success("Wallet imported!");
+      toast.success(t("import.imported"));
       // `freshImport` keeps the first sync silent: everything found is history.
       navigate("/wallet", { replace: true, state: { freshImport: true } });
     } catch (e) {
-      toast.error(String(e));
+      toast.error(errorText(e));
     } finally {
       setLoading(false);
     }
@@ -180,29 +183,29 @@ export default function SeedImportScreen() {
         <button
           onClick={() => (step === "words" ? navigate("/", { replace: true }) : setStep("words"))}
           className="p-1 text-[var(--npt-text)]"
-          aria-label="Back"
+          aria-label={t("common.back")}
         >
           <ChevronLeft size={24} />
         </button>
-        <h1 className="flex-1 text-center text-lg font-semibold pr-4">Import Wallet</h1>
+        <h1 className="flex-1 text-center text-lg font-semibold pr-4">{t("import.title")}</h1>
       </div>
 
       <div className="flex-1 overflow-y-auto">
         {step === "words" && (
           <div className="flex gap-3 flex-col animate-fade-in pb-4">
             <div className="flex justify-center gap-3 py-2 bg-[var(--npt-success)] shadow-md">
-              <p className="text-sm text-white font-medium">Enter your 18-word seed phrase</p>
+              <p className="text-sm text-white font-medium">{t("import.enterWords")}</p>
             </div>
 
             <div className="flex items-center justify-between px-4">
               <span className="text-xs text-[var(--npt-muted)]">
-                {filled}/{WORD_COUNT} words
+                {t("import.wordCount", { filled, total: WORD_COUNT })}
               </span>
               <button
                 onClick={handlePasteButton}
                 className="flex items-center gap-1 px-3 py-1 rounded-full bg-white border border-[var(--npt-border)] text-xs font-semibold text-[var(--npt-blue)] active:opacity-80"
               >
-                <ClipboardPaste size={14} /> Paste 18 words
+                <ClipboardPaste size={14} /> {t("import.paste18")}
               </button>
             </div>
 
@@ -263,13 +266,13 @@ export default function SeedImportScreen() {
             <div className="px-4 min-h-[18px] text-center text-xs">
               {flagged.length > 0 && (
                 <span className="text-[var(--npt-error)]">
-                  Not a seed word: {flagged.map((i) => `#${i + 1}`).join(", ")}
+                  {t("import.notSeedWord", { list: flagged.map((i) => `#${i + 1}`).join(", ") })}
                 </span>
               )}
               {invalid.size === 0 && check?.error && (
-                <span className="text-[var(--npt-error)]">{check.error}</span>
+                <span className="text-[var(--npt-error)]">{errorText(check.error)}</span>
               )}
-              {wordsReady && <span className="text-[var(--npt-success)] font-medium">Seed phrase looks valid</span>}
+              {wordsReady && <span className="text-[var(--npt-success)] font-medium">{t("import.looksValid")}</span>}
             </div>
 
             <div className="flex justify-center">
@@ -278,7 +281,7 @@ export default function SeedImportScreen() {
                 disabled={!wordsReady}
                 className="w-1/2 py-1 rounded-full bg-[var(--npt-blue)] text-white font-semibold disabled:opacity-50 disabled:bg-[var(--npt-muted)]"
               >
-                Continue
+                {t("common.continue")}
               </button>
             </div>
           </div>
@@ -293,12 +296,12 @@ export default function SeedImportScreen() {
 
             <div className="h-3/4 bg-white shadow-2xl shadow-black px-4 pb-4 flex flex-col rounded-t-3xl">
               <h2 className="h-1/6 flex text-lg text-center font-bold flex-col justify-center item-center text-[var(--npt-muted)]">
-                Create new Password
+                {t("create.passwordTitle")}
               </h2>
 
               <div className="h-5/6 flex space-y-5 flex-col gap-1">
                 <div>
-                  <label className="block text-xs text-[var(--npt-muted)]">Enter new password</label>
+                  <label className="block text-xs text-[var(--npt-muted)]">{t("create.newPassword")}</label>
                   <div className="flex items-center border-b border-[var(--npt-border)]">
                     <input
                       type={showPin ? "text" : "password"}
@@ -307,7 +310,7 @@ export default function SeedImportScreen() {
                       onChange={(e) => setPin(e.target.value)}
                       className="flex-1 bg-transparent py-1 text-[var(--npt-text)] focus:outline-none"
                     />
-                    <button type="button" onClick={() => setShowPin(!showPin)} className="text-[var(--npt-muted)]">
+                    <button type="button" onClick={() => setShowPin(!showPin)} className="text-[var(--npt-muted)]" aria-label={t("common.showPassword")}>
                       {showPin ? <EyeOff size={18} /> : <Eye size={18} />}
                     </button>
                   </div>
@@ -327,7 +330,7 @@ export default function SeedImportScreen() {
                 </div>
 
                 <div>
-                  <label className="block text-xs text-[var(--npt-muted)]">Repeat password</label>
+                  <label className="block text-xs text-[var(--npt-muted)]">{t("create.repeatPassword")}</label>
                   <div className="flex items-center border-b border-[var(--npt-border)]">
                     <input
                       type={showConfirm ? "text" : "password"}
@@ -341,6 +344,7 @@ export default function SeedImportScreen() {
                       type="button"
                       onClick={() => setShowConfirm(!showConfirm)}
                       className="text-[var(--npt-muted)]"
+                      aria-label={t("common.showPassword")}
                     >
                       {showConfirm ? <EyeOff size={18} /> : <Eye size={18} />}
                     </button>
@@ -353,7 +357,7 @@ export default function SeedImportScreen() {
                     disabled={loading}
                     className="w-1/2 py-1 rounded-full bg-[var(--npt-blue)] text-white font-semibold disabled:opacity-50 active:opacity-90 transition-opacity"
                   >
-                    {loading ? "Importing..." : "Continue"}
+                    {loading ? t("import.importing") : t("common.continue")}
                   </button>
                 </div>
               </div>

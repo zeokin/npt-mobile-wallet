@@ -10,10 +10,11 @@ All private keys are derived and stored locally on the device. Transactions are 
   - `screens/` — page components (Wallet, Send, History, Settings, Unlock, …)
   - `store/` — Zustand state (wallet, settings, send in progress)
   - `api/rpc.ts` — Tauri invoke wrappers
-  - `lib/` — shared logic: exact amount math, sync, pending transactions, send, node
+  - `lib/` — shared logic: exact amount math, sync, pending transactions, send, node, error texts
   - `hooks/` — React hooks (session guard and background lock, screenshot protection, pull to refresh)
-  - `components/` — sheets (addresses, pending transaction, history details, change password)
+  - `components/` — sheets (addresses, pending transaction, history details, change password, language) and the wallet's status bubble
   - `components/ui/` — shared UI components (NavBar, bottom sheet, QR code, toggle, …)
+  - `i18n/` — UI translations: `en.ts` is the source; every other language has the same keys (checked by TypeScript)
 - `src-tauri/` — Rust backend (neptune-core crates 0.20.x, Triton VM 9)
   - `src/lib.rs` — Tauri commands and app state
   - `src/session.rs` — unlocked-wallet session, auto-lock clock, password-attempt limiter
@@ -21,7 +22,7 @@ All private keys are derived and stored locally on the device. Transactions are 
   - `src/keys.rs` — local key derivation, per-session key cache, address validation
   - `src/sync.rs` — privacy-preserving UTXO scan (flag-based + local decryption, block cache)
   - `src/send.rs` — send pipeline (input selection, membership proofs, retries, submission)
-  - `src/meta.rs` — per-wallet address counters ("New address")
+  - `src/meta.rs` — per-wallet address counters ("New address"), removed and funded addresses
   - `src/android.rs` — Android-only helpers via JNI (screenshot protection, clipboard)
   - `src/transaction.rs` — ProofCollection proving for sends
   - `src/rpc.rs` — JSON-RPC client for supporter node
@@ -49,6 +50,20 @@ the transaction is validated locally, then a `ProofCollection` is proven for the
 tip's consensus rule set. If the node answers that the transaction is no longer
 confirmable (new blocks arrived during proving), it is rebuilt and proven again,
 up to three times. Progress is emitted to the UI as `send_state` events.
+
+**Addresses.** Receiving addresses are derived from the seed by index. "New
+address" hands out the next index; an address the user added can be removed
+from the list if it never received coins. A removed address keeps being
+scanned, so a later payment to it still shows up (and lists it again).
+
+**Languages.** The UI follows the phone's language when it is one of the
+supported ones (English, Chinese, Korean, Japanese, Russian, Spanish,
+Portuguese, French, German, Turkish, Vietnamese, Indonesian), or the language
+chosen in Settings. The seed words stay English (BIP39 word list). To add a
+language, copy `src/i18n/en.ts`, translate the values and register it in
+`src/i18n/index.ts`. TypeScript rejects missing or unknown keys;
+`python3 scripts/check-translations.py src/i18n/en.ts src/i18n/<code>.ts` also
+checks placeholders, bold markers and untranslated terms.
 
 ## Run in development mode on a Debian/Ubuntu system
 

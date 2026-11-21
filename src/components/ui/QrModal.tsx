@@ -2,6 +2,7 @@ import { QRCodeSVG } from "qrcode.react";
 import { Copy } from "lucide-react";
 import { toast } from "sonner";
 import { copyText } from "../../lib/clipboard";
+import { useT } from "../../i18n";
 
 /// A version-40 QR code at level L holds 4296 alphanumeric characters.
 const QR_MAX_CHARS = 4296;
@@ -16,14 +17,15 @@ export default function QrModal({
   address: string;
   onClose: () => void;
 }) {
+  const t = useT();
   const payload = `NPT:${address.toUpperCase()}`;
   const fits = payload.length <= QR_MAX_CHARS;
   // Long (generation) addresses make a very dense code: draw it larger.
   const dense = payload.length > 500;
 
   const handleCopy = async () => {
-    if (await copyText(address)) toast.success("Address copied!");
-    else toast.error("Could not copy the address");
+    if (await copyText(address)) toast.success(t("common.addressCopied"));
+    else toast.error(t("common.copyFailed"));
   };
 
   return (
@@ -49,15 +51,10 @@ export default function QrModal({
             />
           </div>
         ) : (
-          <p className="text-sm text-[var(--npt-muted)] text-center">
-            This address is too long for a QR code. Share it with Copy instead.
-          </p>
+          <p className="text-sm text-[var(--npt-muted)] text-center">{t("qr.tooLong")}</p>
         )}
         {dense && fits && (
-          <p className="text-[11px] text-[var(--npt-muted)] text-center">
-            Generation addresses make a very dense code. Hold the scanning phone steady and
-            close, or share the address with Copy.
-          </p>
+          <p className="text-[11px] text-[var(--npt-muted)] text-center">{t("qr.dense")}</p>
         )}
         <p className="text-[10px] font-mono text-[var(--npt-muted)] break-all text-center max-h-24 overflow-y-auto select-text">
           {address}
@@ -67,13 +64,13 @@ export default function QrModal({
             onClick={handleCopy}
             className="flex-1 flex items-center justify-center gap-2 py-2 rounded-full bg-[var(--npt-logo-bg)] text-[var(--npt-text)] font-medium active:opacity-80"
           >
-            <Copy size={16} /> Copy
+            <Copy size={16} /> {t("common.copy")}
           </button>
           <button
             onClick={onClose}
             className="flex-1 py-2 rounded-full bg-[var(--npt-blue)] text-white font-semibold active:opacity-90"
           >
-            Close
+            {t("common.close")}
           </button>
         </div>
       </div>

@@ -42,7 +42,10 @@ export function SheetRow({ label, children }: { label: string; children: ReactNo
   return (
     <div className="flex items-start justify-between gap-3 py-2 border-b border-[var(--npt-border)] last:border-b-0">
       <span className="text-sm text-[var(--npt-muted)] shrink-0">{label}</span>
-      <span className="text-sm text-[var(--npt-text)] font-medium text-right min-w-0 break-all">{children}</span>
+      {/* Long addresses may break anywhere; text breaks between words. */}
+      <span className="text-sm text-[var(--npt-text)] font-medium text-right min-w-0 [overflow-wrap:anywhere]">
+        {children}
+      </span>
     </div>
   );
 }

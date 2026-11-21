@@ -1,11 +1,14 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { walletExists } from "../api/rpc";
+import { useT } from "../i18n";
 import NeptuneLogo from "../components/ui/NeptuneLogo";
 import NeptuneText from "../components/ui/NeptuneText";
+import { LanguageButton } from "../components/LanguageSheet";
 
 export default function SeedSetupScreen() {
   const navigate = useNavigate();
+  const t = useT();
   const [checking, setChecking] = useState(true);
 
   useEffect(() => {
@@ -19,11 +22,13 @@ export default function SeedSetupScreen() {
 
   return (
     <div className="flex flex-col h-full bg-[var(--npt-blue)] safe-top safe-bottom">
+      <div className="flex justify-end px-3 pt-2">
+        <LanguageButton />
+      </div>
       {/* Centered content */}
       <div className="h-5/6 flex-1 flex flex-col items-center justify-center gap-2">
         <NeptuneLogo size={90} />
-        <p className="text-xl text-white/60 font-light">Welcome to</p>
-        {/* <h1 className="text-5xl font-bold text-white tracking-tight">neptune</h1> */}
+        <p className="text-xl text-white/60 font-light">{t("setup.welcomeTo")}</p>
         <NeptuneText size={180} color="white" />
       </div>
 
@@ -33,15 +38,15 @@ export default function SeedSetupScreen() {
           onClick={() => navigate("/seed/create")}
           className="w-2/3 py-1 rounded-full bg-white text-[var(--npt-blue)] text-lg font-semibold active:opacity-90 transition-opacity"
         >
-          Create New Wallet
+          {t("setup.create")}
         </button></div>
-        <p className="text-center text-sm text-white/70">
-          Already have a wallet?{" "}
+        <p className="text-center text-sm text-white/70 px-4">
+          {t("setup.haveWallet")}{" "}
           <button
             onClick={() => navigate("/seed/import")}
             className="font-bold text-white underline underline-offset-2"
           >
-            Import wallet
+            {t("setup.import")}
           </button>
         </p>
       </div>

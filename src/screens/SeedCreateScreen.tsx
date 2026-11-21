@@ -6,6 +6,9 @@ import { discardNewWallet, finishNewWallet, prepareNewWallet } from "../api/rpc"
 import { useWalletStore } from "../store/wallet-store";
 import { useSecureScreen } from "../hooks/useSecureScreen";
 import { getPasswordStrength, MIN_PASSWORD_LENGTH } from "../lib/password";
+import { errorText } from "../lib/errors";
+import { useT } from "../i18n";
+import Rich from "../i18n/Rich";
 import NeptuneLogo from "../components/ui/NeptuneLogo";
 import NeptuneText from "../components/ui/NeptuneText";
 
@@ -22,6 +25,7 @@ function pickRandom(max: number, count: number, exclude?: number): number[] {
 
 export default function SeedCreateScreen() {
   const navigate = useNavigate();
+  const t = useT();
 
   const [step, setStep] = useState<"password" | "words" | "verify">("password");
   const [pin, setPin] = useState("");
@@ -70,11 +74,11 @@ export default function SeedCreateScreen() {
 
   const handleCreateWallet = async () => {
     if (pin.length < MIN_PASSWORD_LENGTH) {
-      toast.error(`Password must be at least ${MIN_PASSWORD_LENGTH} characters`);
+      toast.error(t("create.tooShort", { n: MIN_PASSWORD_LENGTH }));
       return;
     }
     if (pin !== confirmPin) {
-      toast.error("Passwords do not match");
+      toast.error(t("create.mismatch"));
       setConfirmPin("");
       return;
     }
@@ -88,7 +92,7 @@ export default function SeedCreateScreen() {
       setQuizIndex(0);
       setStep("words");
     } catch (e) {
-      toast.error(String(e));
+      toast.error(errorText(e));
     } finally {
       setLoading(false);
     }
@@ -126,11 +130,11 @@ export default function SeedCreateScreen() {
         setPin("");
         setConfirmPin("");
         useWalletStore.getState().reset();
-        toast.success("Wallet created successfully!");
+        toast.success(t("create.created"));
         // Same as import — silent initial sync for a freshly created wallet.
         navigate("/wallet", { replace: true, state: { freshImport: true } });
       } catch (e) {
-        toast.error(String(e));
+        toast.error(errorText(e));
       } finally {
         setFinishing(false);
       }
@@ -158,10 +162,11 @@ export default function SeedCreateScreen() {
         <button
           onClick={step === "password" ? handleCancel : handleBackToWords}
           className="text-[var(--npt-text)]"
+          aria-label={t("common.back")}
         >
           <ChevronLeft size={24} />
         </button>
-        <h1 className="flex-1 text-center text-lg font-semibold pr-4">Create New Wallet</h1>
+        <h1 className="flex-1 text-center text-lg font-semibold pr-4">{t("create.title")}</h1>
       </div>
 
       <div className="flex-1 overflow-y-auto">
@@ -176,12 +181,12 @@ export default function SeedCreateScreen() {
 
             {/* White password section */}
             <div className="h-3/4 bg-white shadow-2xl shadow-black px-4 pb-4 flex flex-col rounded-t-3xl">
-              <h2 className="h-1/6 flex text-lg text-center font-bold flex-col justify-center item-center text-[var(--npt-muted)]">Create new Password</h2>
+              <h2 className="h-1/6 flex text-lg text-center font-bold flex-col justify-center item-center text-[var(--npt-muted)]">{t("create.passwordTitle")}</h2>
 
               <div className="h-5/6 flex space-y-5 flex-col gap-1">
                 {/* New password */}
                 <div>
-                  <label className="block text-xs text-[var(--npt-muted)]">Enter new password</label>
+                  <label className="block text-xs text-[var(--npt-muted)]">{t("create.newPassword")}</label>
                   <div className="flex items-center border-b border-[var(--npt-border)]">
                     <input
                       type={showPin ? "text" : "password"}
@@ -193,6 +198,7 @@ export default function SeedCreateScreen() {
                       type="button"
                       onClick={() => setShowPin(!showPin)}
                       className="text-[var(--npt-muted)]"
+                      aria-label={t("common.showPassword")}
                     >
                       {showPin ? <EyeOff size={18} /> : <Eye size={18} />}
                     </button>
@@ -215,7 +221,7 @@ export default function SeedCreateScreen() {
 
                 {/* Repeat password */}
                 <div>
-                  <label className="block text-xs text-[var(--npt-muted)]">Repeat password</label>
+                  <label className="block text-xs text-[var(--npt-muted)]">{t("create.repeatPassword")}</label>
                   <div className="flex items-center border-b border-[var(--npt-border)]">
                     <input
                       type={showConfirm ? "text" : "password"}
@@ -228,6 +234,7 @@ export default function SeedCreateScreen() {
                       type="button"
                       onClick={() => setShowConfirm(!showConfirm)}
                       className="text-[var(--npt-muted)]"
+                      aria-label={t("common.showPassword")}
                     >
                       {showConfirm ? <EyeOff size={18} /> : <Eye size={18} />}
                     </button>
@@ -241,7 +248,7 @@ export default function SeedCreateScreen() {
                     disabled={loading}
                     className="w-1/2 py-1 rounded-full bg-[var(--npt-blue)] text-white font-semibold disabled:opacity-50 active:opacity-90 transition-opacity"
                   >
-                    {loading ? "Creating..." : "Continue"}
+                    {loading ? t("create.creating") : t("common.continue")}
                   </button>
                 </div>
               </div>
@@ -256,9 +263,7 @@ export default function SeedCreateScreen() {
               <div className="w-5 h-5 rounded-full bg-white/20 flex items-center justify-center shrink-0">
                 <span className="text-white text-xs font-bold">!</span>
               </div>
-              <p className="text-sm text-white font-medium">
-                Never share your seed phrase!
-              </p>
+              <p className="text-sm text-white font-medium">{t("create.neverShare")}</p>
             </div>
             <div className="grid grid-cols-3 gap-2 px-4">
               {words.map((word, i) => (
@@ -278,13 +283,13 @@ export default function SeedCreateScreen() {
                 onClick={() => setStep("verify")}
                 className="w-2/3 py-1 rounded-full bg-[var(--npt-blue)] text-white font-semibold active:opacity-90"
               >
-                I've Written Them Down
+                {t("create.writtenDown")}
               </button>
               <button
                 onClick={handleCancel}
                 className="w-2/3 py-1 rounded-full text-white text-sm bg-[var(--npt-strong-muted)]"
               >
-                Cancel
+                {t("common.cancel")}
               </button>
             </div>
           </div>
@@ -310,9 +315,10 @@ export default function SeedCreateScreen() {
               ))}
             </div>
 
-            <p className="text-sm text-[var(--npt-text)] text-center">
-              Question {quizIndex + 1} of {TOTAL_QUESTIONS}: What is word{" "}
-              <span className="text-[var(--npt-blue)] font-bold">#{currentWordPos + 1}</span>?
+            <p className="text-sm text-[var(--npt-text)] text-center [&_b]:text-[var(--npt-blue)]">
+              <Rich
+                text={t("create.question", { n: quizIndex + 1, total: TOTAL_QUESTIONS, word: currentWordPos + 1 })}
+              />
             </p>
 
             <div className="grid grid-cols-1 gap-2">
@@ -352,9 +358,9 @@ export default function SeedCreateScreen() {
 
                 {isCorrect
                   ? quizIndex + 1 >= TOTAL_QUESTIONS
-                    ? "All correct! Your backup is verified."
-                    : "Correct! Next question..."
-                  : "Wrong answer. Try again."}
+                    ? t("create.allCorrect")
+                    : t("create.correct")
+                  : t("create.wrong")}
               </div>
             )}
 
@@ -364,7 +370,7 @@ export default function SeedCreateScreen() {
                   onClick={handleBackToWords}
                   className="flex-1 py-1 rounded-full border bg-[var(--npt-strong-muted)] text-white font-semibold"
                 >
-                  Back
+                  {t("common.back")}
                 </button>
               )}
               {showResult && (
@@ -375,9 +381,9 @@ export default function SeedCreateScreen() {
                 >
                   {isCorrect
                     ? quizIndex + 1 >= TOTAL_QUESTIONS
-                      ? "Continue"
-                      : "Next Question"
-                    : "Try Again"}
+                      ? t("common.continue")
+                      : t("create.nextQuestion")
+                    : t("create.tryAgain")}
                 </button>
               )}
             </div>

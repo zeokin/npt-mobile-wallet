@@ -1,13 +1,15 @@
 import { useNavigate, useLocation } from "react-router-dom";
 import { Wallet, Clock, Settings } from "lucide-react";
+import { useT } from "../../i18n";
 
 export default function NavBar() {
   const navigate = useNavigate();
   const location = useLocation();
+  const t = useT();
   const tabs = [
-    { path: "/wallet", icon: Wallet, label: "Wallet" },
-    { path: "/history", icon: Clock, label: "History" },
-    { path: "/settings", icon: Settings, label: "Settings" },
+    { path: "/wallet", icon: Wallet, label: t("nav.wallet") },
+    { path: "/history", icon: Clock, label: t("nav.history") },
+    { path: "/settings", icon: Settings, label: t("nav.settings") },
   ];
   return (
     <nav className="flex bg-[var(--npt-bg)] border-t border-[var(--npt-border)] safe-bottom">

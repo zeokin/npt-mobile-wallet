@@ -38,18 +38,25 @@ export const setAutoLock = (seconds: number) => invoke<void>("set_auto_lock", { 
 export interface AddressEntry {
   index: number;
   address: string;
+  /// Funds were found at this address.
+  received?: boolean;
+  /// Added by the user and never funded: may be removed from the list.
+  removable?: boolean;
 }
-/// The address shown for receiving, per type (the newest handed out).
+/// The address shown for receiving, per type (the newest listed).
 export interface CurrentAddresses {
   generation: AddressEntry;
   ec_hybrid: AddressEntry;
   viewing_address: AddressEntry;
 }
 export const currentAddresses = () => invoke<CurrentAddresses>("current_addresses");
-/// Every handed-out address of a type, newest first.
+/// Every listed (handed-out, not removed) address of a type, newest first.
 export const listAddresses = (keyType: string) => invoke<AddressEntry[]>("list_addresses", { keyType });
 /// Hand out a fresh address (one per payer improves privacy).
 export const newAddress = (keyType: string) => invoke<AddressEntry>("new_address", { keyType });
+/// Remove an address from the list. The wallet keeps watching it.
+export const removeAddress = (keyType: string, index: number) =>
+  invoke<void>("remove_address", { keyType, index });
 
 // Recipient address validation (for the connected network).
 export interface AddressValidation {
