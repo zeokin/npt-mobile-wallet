@@ -618,6 +618,21 @@ async fn generate_main_addresses(
 struct AddressEntry {
     index: u64,
     address: String,
+    /// Funds were found at this address.
+    received: bool,
+    /// The user may remove it from the list (added by them, never funded).
+    removable: bool,
+}
+
+impl AddressEntry {
+    fn new(meta: &meta::WalletMeta, key_type: KeyType, index: u64, address: String) -> Self {
+        Self {
+            index,
+            address,
+            received: meta.is_funded(key_type, index),
+            removable: meta.can_remove(key_type, index),
+        }
+    }
 }
 
 /// The address shown for receiving, per type (the newest handed out).
@@ -648,10 +663,8 @@ async fn current_addresses(
     tokio::task::spawn_blocking(move || -> Result<CurrentAddresses, String> {
         let entry = |kt: KeyType| -> Result<AddressEntry, String> {
             let index = meta.current_index(kt);
-            Ok(AddressEntry {
-                index,
-                address: keys::derive_receiving_address(&keys, &entropy, index, kt, net)?,
-            })
+            let address = keys::derive_receiving_address(&keys, &entropy, index, kt, net)?;
+            Ok(AddressEntry::new(&meta, kt, index, address))
         };
         Ok(CurrentAddresses {
             generation: entry(KeyType::Generation)?,
@@ -663,7 +676,7 @@ async fn current_addresses(
     .map_err(|e| format!("Address task failed: {e}"))?
 }
 
-/// Every handed-out address of a type, newest first.
+/// Every listed (handed-out, not removed) address of a type, newest first.
 #[tauri::command]
 async fn list_addresses(
     app: tauri::AppHandle,
@@ -673,20 +686,37 @@ async fn list_addresses(
     let kt = receiving_key_type(&key_type)?;
     let (entropy, keys) = active_session(state.inner())?;
     let net = *state.network.lock().unwrap();
-    let count = meta::WalletMeta::load(&app_dir(&app)?).next_index(kt);
+    let meta = meta::WalletMeta::load(&app_dir(&app)?);
     tokio::task::spawn_blocking(move || {
-        (0..count)
-            .rev()
+        meta.listed(kt)
+            .into_iter()
             .map(|index| {
-                Ok(AddressEntry {
-                    index,
-                    address: keys::derive_receiving_address(&keys, &entropy, index, kt, net)?,
-                })
+                let address = keys::derive_receiving_address(&keys, &entropy, index, kt, net)?;
+                Ok(AddressEntry::new(&meta, kt, index, address))
             })
             .collect::<Result<Vec<_>, String>>()
     })
     .await
     .map_err(|e| format!("Address task failed: {e}"))?
+}
+
+/// Remove an address the user added from the list. It keeps being scanned,
+/// so a later payment to it still shows up (and lists it again).
+#[tauri::command]
+async fn remove_address(
+    app: tauri::AppHandle,
+    key_type: String,
+    index: u64,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let kt = receiving_key_type(&key_type)?;
+    active_session(state.inner())?;
+    touch_session(state.inner());
+    let dir = app_dir(&app)?;
+    let _guard = state.meta_lock.lock().unwrap();
+    let mut meta = meta::WalletMeta::load(&dir);
+    meta.remove(kt, index)?;
+    meta.save(&dir)
 }
 
 /// Hand out a fresh address of a type (e.g. one per payer, for privacy).
@@ -701,19 +731,19 @@ async fn new_address(
     touch_session(state.inner());
     let net = *state.network.lock().unwrap();
     let dir = app_dir(&app)?;
-    let index = {
+    let (index, meta) = {
         let _guard = state.meta_lock.lock().unwrap();
         let mut meta = meta::WalletMeta::load(&dir);
         let index = meta.issue(kt)?;
         meta.save(&dir)?;
-        index
+        (index, meta)
     };
     let address = tokio::task::spawn_blocking(move || {
         keys::derive_receiving_address(&keys, &entropy, index, kt, net)
     })
     .await
     .map_err(|e| format!("Address task failed: {e}"))??;
-    Ok(AddressEntry { index, address })
+    Ok(AddressEntry::new(&meta, kt, index, address))
 }
 
 // ── Device helpers ───────────────────────────────────────────
@@ -1140,6 +1170,7 @@ pub fn run() {
             current_addresses,
             list_addresses,
             new_address,
+            remove_address,
             validate_address,
             // Device
             set_secure_screen,
