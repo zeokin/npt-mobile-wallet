@@ -1,6 +1,6 @@
 [package]
 name = "npt-mobile-wallet"
-version = "0.3.1"
+version = "0.3.2"
 description = "Neptune Cash Wallet"
 authors = ["you"]
 edition = "2021"
