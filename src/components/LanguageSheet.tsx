@@ -52,7 +52,7 @@ export function LanguageButton() {
         className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-white/15 text-xs font-medium text-white/90 active:opacity-80"
         aria-label={t("settings.language")}
       >
-        <Globe size={14} /> {name}
+        <Globe size={14} /> <span>{name}</span>
       </button>
       <LanguageSheet open={open} onClose={() => setOpen(false)} />
     </>

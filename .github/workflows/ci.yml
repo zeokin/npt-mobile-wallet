@@ -108,6 +108,10 @@ jobs:
       - name: Type-check frontend
         run: npx tsc --noEmit
 
+      # Old WebViews have no flex `gap`; see "Old WebViews" in the README.
+      - name: Check flex gaps for old WebViews
+        run: npm run check:gap
+
       - name: Build Android APK (unsigned)
         env:
           NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/27.0.12077973

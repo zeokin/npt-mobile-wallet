@@ -205,7 +205,7 @@ export default function SeedImportScreen() {
                 onClick={handlePasteButton}
                 className="flex items-center gap-1 px-3 py-1 rounded-full bg-white border border-[var(--npt-border)] text-xs font-semibold text-[var(--npt-blue)] active:opacity-80"
               >
-                <ClipboardPaste size={14} /> {t("import.paste18")}
+                <ClipboardPaste size={14} /> <span>{t("import.paste18")}</span>
               </button>
             </div>
 

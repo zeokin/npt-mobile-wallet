@@ -1,4 +1,6 @@
-@import "tailwindcss";
+/* Class names are read from the app sources only. By default Tailwind scans
+   the whole project, so a word in a script or a README could add CSS. */
+@import "tailwindcss" source(none);
 @source "../src/**/*.{tsx,ts}";
 :root {
   --npt-blue: #347AF0;
@@ -104,7 +106,8 @@ input::-webkit-textfield-decoration-container {
 
 /* ── Wallet timeline (TxTimeline): the line is time, points are events ── */
 .tl-card {
-  position: absolute; left: 16px; right: 16px; top: 0;
+  /* The width is spelled out: before Chrome 100 a <button> does not stretch between left and right. */
+  position: absolute; left: 16px; right: 16px; top: 0; width: calc(100% - 32px);
   background: #fff; border-radius: 18px; padding: 12px 14px; text-align: left;
   box-shadow: 0 14px 30px rgba(13, 31, 60, 0.22); color: var(--npt-text);
 }

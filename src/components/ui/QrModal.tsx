@@ -64,7 +64,7 @@ export default function QrModal({
             onClick={handleCopy}
             className="flex-1 flex items-center justify-center gap-2 py-2 rounded-full bg-[var(--npt-logo-bg)] text-[var(--npt-text)] font-medium active:opacity-80"
           >
-            <Copy size={16} /> {t("common.copy")}
+            <Copy size={16} /> <span>{t("common.copy")}</span>
           </button>
           <button
             onClick={onClose}

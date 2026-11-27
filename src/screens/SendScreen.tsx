@@ -351,7 +351,7 @@ export default function SendScreen() {
                   onClick={handlePaste}
                   className="flex items-center gap-1 text-xs font-semibold text-[var(--npt-blue)] active:opacity-70 shrink-0"
                 >
-                  <ClipboardPaste size={14} /> {t("send.paste")}
+                  <ClipboardPaste size={14} /> <span>{t("send.paste")}</span>
                 </button>
               </div>
               <textarea
@@ -375,13 +375,15 @@ export default function SendScreen() {
                 {!checking && validation?.valid && (
                   <span className="flex items-center gap-1 text-[var(--npt-success)] font-medium">
                     <CheckCircle2 size={14} className="shrink-0" />
-                    {t("send.addressType", { type: keyTypeLabel(validation.key_type) })}
-                    {validation.key_type === "symmetric" && ` ${t("send.symmetricNote")}`}
+                    <span>
+                      {t("send.addressType", { type: keyTypeLabel(validation.key_type) })}
+                      {validation.key_type === "symmetric" && ` ${t("send.symmetricNote")}`}
+                    </span>
                   </span>
                 )}
                 {addressError && (
                   <span className="flex items-start gap-1 text-[var(--npt-error)]">
-                    <XCircle size={14} className="shrink-0 mt-px" /> {addressError}
+                    <XCircle size={14} className="shrink-0 mt-px" /> <span>{addressError}</span>
                   </span>
                 )}
               </div>
@@ -625,7 +627,7 @@ export default function SendScreen() {
               onClick={() => copyWithToast(result.txid, "txid")}
               className="inline-flex items-center gap-1 font-mono text-xs"
             >
-              {shortAddress(result.txid, 10, 8)} <Copy size={12} />
+              <span>{shortAddress(result.txid, 10, 8)}</span> <Copy size={12} />
             </button>
           </SheetRow>
         )}
@@ -635,7 +637,7 @@ export default function SendScreen() {
               onClick={() => openExplorerWithToast(recipientOutput.commitment)}
               className="w-full flex items-center justify-center gap-2 py-2 rounded-full bg-[var(--npt-logo-bg)] text-[var(--npt-blue)] font-semibold active:opacity-80"
             >
-              <ExternalLink size={16} /> {t("common.viewOnExplorer")}
+              <ExternalLink size={16} /> <span>{t("common.viewOnExplorer")}</span>
             </button>
           )}
           <button

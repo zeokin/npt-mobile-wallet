@@ -12,7 +12,7 @@ All private keys are derived and stored locally on the device. Transactions are 
   - `api/rpc.ts` — Tauri invoke wrappers
   - `lib/` — shared logic: exact amount math, sync, pending transactions, send, node, error texts
   - `hooks/` — React hooks (session guard and background lock, screenshot protection, pull to refresh)
-  - `components/` — sheets (addresses, pending transaction, history details, change password, language) and the wallet's status bubble
+  - `components/` — sheets (addresses, pending transaction, history details, change password, language) and the wallet timeline
   - `components/ui/` — shared UI components (NavBar, bottom sheet, QR code, toggle, …)
   - `i18n/` — UI translations: `en.ts` is the source; every other language has the same keys (checked by TypeScript)
 - `src-tauri/` — Rust backend (neptune-core crates 0.20.x, Triton VM 9)
@@ -27,6 +27,7 @@ All private keys are derived and stored locally on the device. Transactions are 
   - `src/transaction.rs` — ProofCollection proving for sends
   - `src/rpc.rs` — JSON-RPC client for supporter node
   - `gen/android/` — generated Android project (gradle, manifest, Kotlin shims)
+- `scripts/` — build and check scripts (styles for old WebViews, translation checks)
 
 ## How it works
 
@@ -64,6 +65,23 @@ language, copy `src/i18n/en.ts`, translate the values and register it in
 `src/i18n/index.ts`. TypeScript rejects missing or unknown keys;
 `python3 scripts/check-translations.py src/i18n/en.ts src/i18n/<code>.ts` also
 checks placeholders, bold markers and untranslated terms.
+
+**Old WebViews.** The UI runs in the phone's "Android System WebView", which
+can be years older than the phone's Android version: phones that do not get
+Play Store updates, emulators, and the devices that app stores review on.
+Tailwind 4 needs a 2023 browser engine (Chrome 111); on an older one all of its
+styles are ignored and the app shows as bare HTML. So `npm run build` ends with
+`scripts/legacy-css.mjs`, which appends a copy of the styles rewritten for old
+engines. Only engines without `color-mix()` read that copy; current ones skip
+it. The JavaScript is built for Chrome 69 (`build.target` in `vite.config.ts`).
+The app is checked on Chromium 74 to 110 and on a current one, and looks the
+same on all of them. Two rules keep it that way:
+
+- Text next to an icon in a flex container with a `gap-*` class goes in a
+  `<span>` (old engines turn the gap into margins, and a margin needs an
+  element). `npm run check:gap` lists the places that break this; CI runs it.
+- The build fails if the styles contain something an old engine cannot read
+  and `legacy-css.mjs` has no rule for it yet. Add the rule there.
 
 ## Run in development mode on a Debian/Ubuntu system
 

@@ -80,7 +80,7 @@ export default function TxDetailSheet({
           onClick={() => copyWithToast(tx.recipient, "address")}
           className="inline-flex items-center gap-1 font-mono text-xs"
         >
-          {shortAddress(tx.recipient, 12, 8)} <Copy size={12} />
+          <span>{shortAddress(tx.recipient, 12, 8)}</span> <Copy size={12} />
         </button>
       </SheetRow>
       <SheetRow label={t("tx.date")}>{formatDateTime(tx.timestamp)}</SheetRow>
@@ -90,7 +90,7 @@ export default function TxDetailSheet({
             onClick={() => copyWithToast(tx.txid!, "txid")}
             className="inline-flex items-center gap-1 font-mono text-xs"
           >
-            {shortAddress(tx.txid, 10, 8)} <Copy size={12} />
+            <span>{shortAddress(tx.txid, 10, 8)}</span> <Copy size={12} />
           </button>
         </SheetRow>
       )}
@@ -105,7 +105,7 @@ export default function TxDetailSheet({
             onClick={() => openExplorerWithToast(recipientOutput.commitment)}
             className="w-full flex items-center justify-center gap-2 py-2 rounded-full bg-[var(--npt-logo-bg)] text-[var(--npt-blue)] font-semibold active:opacity-80"
           >
-            <ExternalLink size={16} /> {t("common.viewOnExplorer")}
+            <ExternalLink size={16} /> <span>{t("common.viewOnExplorer")}</span>
           </button>
         )}
         <button

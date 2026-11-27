@@ -8,6 +8,15 @@ const host = process.env.TAURI_DEV_HOST;
 export default defineConfig(async () => ({
   plugins: [react()],
 
+  build: {
+    // An Android WebView is only as new as the phone's "Android System WebView"
+    // app, so the script is written for old ones too (Chrome 69, 2018). The
+    // stylesheet keeps the target for current browsers: old WebViews get their
+    // own copy of the styles from scripts/legacy-css.mjs.
+    target: "chrome69",
+    cssTarget: ["chrome107", "edge107", "firefox104", "safari16"],
+  },
+
   // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
   //
   // 1. prevent Vite from obscuring rust errors

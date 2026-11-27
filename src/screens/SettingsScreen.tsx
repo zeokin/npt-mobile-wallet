@@ -309,7 +309,7 @@ export default function SettingsScreen() {
                   disabled={nodeBusy}
                   className="flex items-center gap-1 text-xs font-semibold text-[var(--npt-blue)] disabled:opacity-50"
                 >
-                  <RotateCcw size={12} /> {t("settings.resetDefault")}
+                  <RotateCcw size={12} /> <span>{t("settings.resetDefault")}</span>
                 </button>
                 <button
                   onClick={() => setEditingNode(false)}
@@ -443,7 +443,7 @@ export default function SettingsScreen() {
             className="w-full flex items-center justify-center gap-2 py-2 rounded-md bg-[var(--npt-pending)] text-[var(--npt-white)] font-semibold active:opacity-80"
           >
             <Lock size={16} />
-            {t("settings.lockWallet")}
+            <span>{t("settings.lockWallet")}</span>
           </button>
           <p className="text-xs text-center text-[var(--npt-muted)] pt-2">
             Neptune Cash Wallet{appVersion ? ` v${appVersion}` : ""}

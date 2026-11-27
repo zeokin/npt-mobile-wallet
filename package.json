@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc && vite build",
+    "build": "tsc && vite build && node scripts/legacy-css.mjs",
+    "check:gap": "node scripts/check-flex-gap.mjs",
     "preview": "vite preview",
     "tauri": "tauri"
   },
@@ -26,13 +27,16 @@
     "zustand": "^5.0.12"
   },
   "devDependencies": {
+    "@csstools/postcss-cascade-layers": "6.0.2",
     "@tailwindcss/postcss": "^4.2.2",
     "@tauri-apps/cli": "^2.10.1",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^4.6.0",
     "autoprefixer": "^10.4.27",
+    "lightningcss": "1.32.0",
     "postcss": "^8.5.8",
+    "postcss-selector-parser": "7.2.1",
     "tailwindcss": "^4.2.2",
     "typescript": "~5.8.3",
     "vite": "^7.0.4"

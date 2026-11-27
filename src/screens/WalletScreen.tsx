@@ -200,7 +200,7 @@ export default function WalletScreen() {
             title={syncError ? errorText(syncError) : undefined}
           >
             <span className={`w-2 h-2 rounded-full ${statusDot}`} />
-            {statusText}
+            <span>{statusText}</span>
           </button>
         </div>
 
@@ -264,14 +264,14 @@ export default function WalletScreen() {
                 disabled={creating || !current}
                 className="flex items-center gap-1 disabled:opacity-60 active:opacity-80"
               >
-                <Plus size={14} /> {creating ? t("wallet.creating") : t("wallet.newAddress")}
+                <Plus size={14} /> <span>{creating ? t("wallet.creating") : t("wallet.newAddress")}</span>
               </button>
             )}
             <button
               onClick={() => setShowAddresses(true)}
               className="flex items-center gap-1 active:opacity-80"
             >
-              <List size={14} /> {t("wallet.allAddresses")}
+              <List size={14} /> <span>{t("wallet.allAddresses")}</span>
             </button>
           </div>
         </div>
